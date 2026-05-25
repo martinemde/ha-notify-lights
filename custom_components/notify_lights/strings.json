@@ -1,0 +1,10 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Notify Lights",
+        "description": "Set up Notify Lights to control LED notifications on your smart switches."
+      }
+    }
+  }
+}

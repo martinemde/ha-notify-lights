@@ -1,0 +1,12 @@
+{
+  "domain": "notify_lights",
+  "name": "Notify Lights",
+  "codeowners": ["@martinemde"],
+  "config_flow": true,
+  "dependencies": ["mqtt"],
+  "documentation": "https://github.com/martinemde/ha-notify-lights",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/martinemde/ha-notify-lights/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}
