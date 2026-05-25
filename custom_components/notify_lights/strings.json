@@ -3,17 +3,10 @@
     "step": {
       "user": {
         "title": "Create Notification Pool",
-        "description": "Name this notification target group and optionally assign it to an area.",
+        "description": "A notification pool targets a set of lights and switches for LED notifications. Give your pool a name and select the devices or entities to include.",
         "data": {
           "name": "Pool name",
-          "area_id": "Area"
-        }
-      },
-      "targets": {
-        "title": "Select Targets",
-        "description": "Choose which light/switch entities this pool targets.",
-        "data": {
-          "targets": "Target entities"
+          "targets": "Target devices"
         }
       }
     }
@@ -21,19 +14,19 @@
   "options": {
     "step": {
       "init": {
+        "description": "This pool targets a set of lights for LED notifications. Configure the target devices and manage notifications below.",
         "menu_options": {
-          "basics": "Pool settings",
+          "targets": "Targets",
           "add": "Add notification",
           "modify": "Modify notification",
           "delete": "Delete notification"
         }
       },
-      "basics": {
-        "title": "Pool Settings",
+      "targets": {
+        "title": "Targets",
+        "description": "Choose which devices and entities this pool targets for notifications.",
         "data": {
-          "name": "Pool name",
-          "area_id": "Area",
-          "targets": "Target entities"
+          "targets": "Target devices"
         }
       },
       "add": {
