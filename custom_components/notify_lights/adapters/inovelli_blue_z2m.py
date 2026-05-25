@@ -98,7 +98,14 @@ def _build_led_effect_payload(notification: Any) -> dict:
     }
 
 
-_CLEAR_PAYLOAD = json.dumps({"led_effect": {"effect": "clear_effect"}})
+_CLEAR_PAYLOAD = json.dumps({
+    "led_effect": {
+        "effect": "clear_effect",
+        "color": 0,
+        "level": 100,
+        "duration": 255,
+    }
+})
 
 
 class InovelliBlueZ2MAdapter(NotificationAdapter):
