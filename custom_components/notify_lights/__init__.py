@@ -18,72 +18,81 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS = ["switch", "button"]
 
 
+def _get_or_create_coordinator(hass: HomeAssistant) -> NotifyLightsCoordinator:
+    """Return the global coordinator singleton, creating it if needed."""
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if "coordinator" not in domain_data:
+        entity_registry = er.async_get(hass)
+        device_registry = dr.async_get(hass)
+
+        adapter_registry = AdapterRegistry()
+        adapter_registry.register(InovelliBlueZ2MAdapter(hass))
+
+        domain_data["coordinator"] = NotifyLightsCoordinator(
+            hass, adapter_registry, entity_registry, device_registry
+        )
+        _LOGGER.info("Created global NotifyLightsCoordinator")
+
+    return domain_data["coordinator"]
+
+
 def notifications_from_options(options: dict) -> dict[str, Notification]:
     """Build Notification objects from config entry options."""
-    _LOGGER.debug("Parsing options: %s", options)
     result: dict[str, Notification] = {}
-    for name, config in options.get("notifications", {}).items():
+    for slug, config in options.get("notifications", {}).items():
         color = config["color"]
-        if color in NAMED_COLORS:
+        if isinstance(color, str) and color in NAMED_COLORS:
             color = NAMED_COLORS[color]
-        result[name] = Notification(
-            name=name,
+        result[slug] = Notification(
+            name=slug,
             color=color,
             brightness=int(config["brightness"]),
             effect=Effect(config["effect"]),
             effect_speed=Speed(config["effect_speed"]),
             duration=int(config["duration"]),
             priority=int(config["priority"]),
-            targets=config["targets"],
-        )
-        _LOGGER.debug(
-            "Parsed notification %s: color=%s effect=%s targets=%s",
-            name, color, config["effect"], config["targets"],
         )
     _LOGGER.info("Loaded %d notifications from options", len(result))
     return result
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    _LOGGER.info("Setting up entry %s", entry.entry_id)
-    _LOGGER.debug("Entry data=%s options=%s", entry.data, entry.options)
+    _LOGGER.info("Setting up pool entry %s (%s)", entry.entry_id, entry.data.get("name"))
 
-    entity_registry = er.async_get(hass)
+    coordinator = _get_or_create_coordinator(hass)
+    notifications = notifications_from_options(entry.options)
+    targets = entry.data.get("targets", [])
+
+    # Register device for this pool
     device_registry = dr.async_get(hass)
-
-    adapter_registry = AdapterRegistry()
-    adapter_registry.register(InovelliBlueZ2MAdapter(hass))
-
-    coordinator = NotifyLightsCoordinator(
-        hass, adapter_registry, entity_registry, device_registry
+    device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, entry.entry_id)},
+        name=entry.data.get("name", "Notify Lights Pool"),
+        suggested_area=entry.data.get("area_id") or None,
     )
 
-    notifications = notifications_from_options(entry.options)
-
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+    hass.data[DOMAIN][entry.entry_id] = {
         "coordinator": coordinator,
         "notifications": notifications,
+        "targets": targets,
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
-    _LOGGER.info("Setup complete for entry %s", entry.entry_id)
+    _LOGGER.info("Setup complete for pool %s", entry.entry_id)
     return True
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    _LOGGER.info(
-        "Options updated for entry %s, reloading. options=%s",
-        entry.entry_id, entry.options,
-    )
+    _LOGGER.info("Options updated for pool %s, reloading", entry.entry_id)
     await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    _LOGGER.info("Unloading entry %s", entry.entry_id)
+    _LOGGER.info("Unloading pool %s", entry.entry_id)
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id)
-    _LOGGER.info("Unload %s: %s", entry.entry_id, "ok" if unload_ok else "FAILED")
+        hass.data[DOMAIN].pop(entry.entry_id, None)
     return unload_ok
