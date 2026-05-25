@@ -65,7 +65,6 @@ def _make_notif(
         effect_speed=speed,
         duration=duration,
         priority=priority,
-        targets=["light.lr"],
     )
 
 

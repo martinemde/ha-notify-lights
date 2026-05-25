@@ -9,7 +9,6 @@ def _notif(name, priority=50, duration=0, activated_at=0.0):
             name=name, color=0, brightness=100,
             effect=Effect.SOLID, effect_speed=Speed.MEDIUM,
             duration=duration, priority=priority,
-            targets=["light.lr"],
         ),
         activated_at,
     )

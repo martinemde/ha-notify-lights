@@ -4,12 +4,15 @@ from custom_components.notify_lights.button import NotificationButton
 from custom_components.notify_lights.notification import Notification
 from custom_components.notify_lights.const import Effect, Speed
 
+TARGETS = ["light.lr"]
+ENTRY_ID = "pool_entry_1"
+
+
 def _make_notif(name="flash_alert", duration=10):
     return Notification(
         name=name, color=0, brightness=100,
         effect=Effect.BLINK, effect_speed=Speed.FAST,
         duration=duration, priority=50,
-        targets=["light.lr"],
     )
 
 @pytest.mark.asyncio
@@ -17,19 +20,19 @@ async def test_press_activates_notification():
     coordinator = AsyncMock()
     hass = MagicMock()
     notif = _make_notif()
-    button = NotificationButton(coordinator, notif, hass)
+    button = NotificationButton(coordinator, notif, TARGETS, ENTRY_ID, hass)
 
     await button.async_press()
 
-    coordinator.async_activate.assert_called_once_with(notif)
+    coordinator.async_activate.assert_called_once_with(notif, TARGETS, ENTRY_ID)
 
 def test_entity_id_derives_from_name():
     coordinator = AsyncMock()
     hass = MagicMock()
     notif = _make_notif("door_flash")
-    button = NotificationButton(coordinator, notif, hass)
+    button = NotificationButton(coordinator, notif, TARGETS, ENTRY_ID, hass)
 
-    assert button.unique_id == "notify_lights_door_flash"
+    assert button.unique_id == f"notify_lights_{ENTRY_ID}_door_flash"
     assert button.name == "Notify door flash"
 
 @pytest.mark.asyncio
@@ -40,7 +43,7 @@ async def test_press_schedules_deactivation():
     hass.loop = MagicMock()
 
     notif = _make_notif(duration=5)
-    button = NotificationButton(coordinator, notif, hass)
+    button = NotificationButton(coordinator, notif, TARGETS, ENTRY_ID, hass)
 
     with patch("custom_components.notify_lights.button.async_call_later", return_value=cancel_callback) as mock_call_later:
         await button.async_press()
@@ -56,7 +59,7 @@ async def test_second_press_cancels_previous_timer():
     cancel2 = MagicMock()
 
     notif = _make_notif(duration=5)
-    button = NotificationButton(coordinator, notif, hass)
+    button = NotificationButton(coordinator, notif, TARGETS, ENTRY_ID, hass)
 
     with patch("custom_components.notify_lights.button.async_call_later", side_effect=[cancel1, cancel2]):
         await button.async_press()
