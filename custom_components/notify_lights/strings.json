@@ -2,20 +2,38 @@
   "config": {
     "step": {
       "user": {
-        "title": "Notify Lights",
-        "description": "Set up Notify Lights to control LED notifications on your smart switches."
+        "title": "Create Notification Pool",
+        "description": "Name this notification target group and optionally assign it to an area.",
+        "data": {
+          "name": "Pool name",
+          "area_id": "Area"
+        }
+      },
+      "targets": {
+        "title": "Select Targets",
+        "description": "Choose which light/switch entities this pool targets.",
+        "data": {
+          "targets": "Target entities"
+        }
       }
-    },
-    "abort": {
-      "already_configured": "Notify Lights is already configured."
     }
   },
   "options": {
     "step": {
       "init": {
         "menu_options": {
+          "basics": "Pool settings",
           "add": "Add notification",
-          "remove": "Remove notification"
+          "modify": "Modify notification",
+          "delete": "Delete notification"
+        }
+      },
+      "basics": {
+        "title": "Pool Settings",
+        "data": {
+          "name": "Pool name",
+          "area_id": "Area",
+          "targets": "Target entities"
         }
       },
       "add": {
@@ -28,14 +46,31 @@
           "effect_speed": "Speed",
           "brightness": "Brightness",
           "duration": "Duration (seconds, 0 = stays on)",
-          "priority": "Priority",
-          "targets": "Target switches"
+          "priority": "Priority"
         }
       },
-      "remove": {
-        "title": "Remove Notification",
+      "modify": {
+        "title": "Modify Notification",
         "data": {
-          "name": "Notification to remove"
+          "slug": "Notification to modify"
+        }
+      },
+      "modify_form": {
+        "title": "Edit Notification",
+        "data": {
+          "name": "Display name",
+          "color": "Color",
+          "effect": "Effect",
+          "effect_speed": "Speed",
+          "brightness": "Brightness",
+          "duration": "Duration (seconds, 0 = stays on)",
+          "priority": "Priority"
+        }
+      },
+      "delete": {
+        "title": "Delete Notification",
+        "data": {
+          "slug": "Notification to delete"
         }
       }
     },

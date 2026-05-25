@@ -13,10 +13,10 @@ class _ConfigFlow:
             cls.domain = domain
 
     def async_show_form(self, *, step_id, data_schema=None, errors=None):
-        return {"type": "form", "step_id": step_id}
+        return {"type": "form", "step_id": step_id, "data_schema": data_schema}
 
-    def async_create_entry(self, *, title, data):
-        return {"type": "create_entry", "title": title, "data": data}
+    def async_create_entry(self, *, title, data, options=None):
+        return {"type": "create_entry", "title": title, "data": data, "options": options or {}}
 
     async def async_set_unique_id(self, unique_id):
         self._unique_id = unique_id
@@ -31,9 +31,10 @@ class _OptionsFlowWithConfigEntry:
     def __init__(self, config_entry=None):
         self.config_entry = config_entry
         self.options = getattr(config_entry, "options", {}) if config_entry else {}
+        self.hass = getattr(config_entry, "hass", None)
 
-    def async_show_form(self, *, step_id, data_schema=None, errors=None):
-        return {"type": "form", "step_id": step_id}
+    def async_show_form(self, *, step_id, data_schema=None, errors=None, description_placeholders=None):
+        return {"type": "form", "step_id": step_id, "data_schema": data_schema}
 
     def async_create_entry(self, *, data, title=""):
         return {"type": "create_entry", "data": data}
@@ -66,6 +67,7 @@ if "voluptuous" not in sys.modules:
     _vol = MagicMock()
     _vol.Schema = MagicMock(side_effect=lambda schema: schema)
     _vol.Required = MagicMock(side_effect=lambda key, **kw: key)
+    _vol.Optional = MagicMock(side_effect=lambda key, **kw: key)
     sys.modules["voluptuous"] = _vol
 
 # Switch entity stub
