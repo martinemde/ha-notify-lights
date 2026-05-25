@@ -14,7 +14,6 @@ class Notification:
     effect_speed: Speed
     duration: int
     priority: int
-    targets: list[str]
 
     def __post_init__(self) -> None:
         color = self.color
@@ -32,8 +31,6 @@ class Notification:
             )
         if not 0 <= self.priority <= 100:
             raise ValueError(f"Priority must be 0-100, got {self.priority}")
-        if not self.targets:
-            raise ValueError("At least one target is required")
 
     @property
     def is_stateful(self) -> bool:

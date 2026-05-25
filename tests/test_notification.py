@@ -1,3 +1,4 @@
+# tests/test_notification.py
 import pytest
 from custom_components.notify_lights.notification import Notification
 from custom_components.notify_lights.const import Effect, Speed
@@ -12,7 +13,6 @@ def test_create_notification_with_all_fields():
         effect_speed=Speed.FAST,
         duration=0,
         priority=50,
-        targets=["light.living_room"],
     )
     assert n.name == "heating"
     assert n.color == 120
@@ -28,7 +28,6 @@ def test_named_color_resolves_to_hue():
         effect_speed=Speed.MEDIUM,
         duration=0,
         priority=50,
-        targets=["light.living_room"],
     )
     assert n.color == 240
 
@@ -38,16 +37,7 @@ def test_hue_out_of_range_raises():
         Notification(
             name="test", color=400, brightness=100,
             effect=Effect.SOLID, effect_speed=Speed.MEDIUM,
-            duration=0, priority=50, targets=["light.lr"],
-        )
-
-
-def test_empty_targets_raises():
-    with pytest.raises(ValueError):
-        Notification(
-            name="test", color=0, brightness=100,
-            effect=Effect.SOLID, effect_speed=Speed.MEDIUM,
-            duration=0, priority=50, targets=[],
+            duration=0, priority=50,
         )
 
 
@@ -55,7 +45,7 @@ def test_stateful_when_duration_zero():
     n = Notification(
         name="test", color=0, brightness=100,
         effect=Effect.SOLID, effect_speed=Speed.MEDIUM,
-        duration=0, priority=50, targets=["light.lr"],
+        duration=0, priority=50,
     )
     assert n.is_stateful
     assert not n.is_momentary
@@ -65,7 +55,7 @@ def test_momentary_when_duration_positive():
     n = Notification(
         name="test", color=0, brightness=100,
         effect=Effect.SOLID, effect_speed=Speed.MEDIUM,
-        duration=10, priority=50, targets=["light.lr"],
+        duration=10, priority=50,
     )
     assert n.is_momentary
     assert not n.is_stateful
