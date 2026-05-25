@@ -7,5 +7,8 @@ for module in [
     "homeassistant",
     "homeassistant.config_entries",
     "homeassistant.core",
+    "homeassistant.helpers",
+    "homeassistant.helpers.entity_registry",
+    "homeassistant.helpers.device_registry",
 ]:
     sys.modules.setdefault(module, MagicMock())
