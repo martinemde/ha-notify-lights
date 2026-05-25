@@ -11,8 +11,14 @@ from homeassistant.config_entries import (
     ConfigFlow,
     OptionsFlowWithConfigEntry,
 )
-from homeassistant.helpers import selector
+from homeassistant.helpers import (
+    device_registry as dr,
+    entity_registry as er,
+    selector,
+)
 
+from .adapter import AdapterRegistry
+from .adapters.inovelli_blue_z2m import InovelliBlueZ2MAdapter
 from .const import (
     DEFAULT_BRIGHTNESS,
     DEFAULT_PRIORITY,
@@ -38,44 +44,94 @@ SPEED_OPTIONS = [
     for s in Speed
 ]
 
-NOTIFICATION_SCHEMA = vol.Schema(
-    {
-        vol.Required("name"): selector.TextSelector(),
-        vol.Required("color", default="blue"): selector.SelectSelector(
+def _build_notification_schema(
+    target_entity_ids: list[str] | None = None,
+) -> vol.Schema:
+    """Build the notification form schema.
+
+    When target_entity_ids is provided, constrains the target picker
+    to only entities whose devices match a registered adapter.
+    """
+    if target_entity_ids:
+        target_options = [
+            selector.SelectOptionDict(value=eid, label=eid)
+            for eid in sorted(target_entity_ids)
+        ]
+        targets_selector = selector.SelectSelector(
             selector.SelectSelectorConfig(
-                options=COLOR_OPTIONS,
+                options=target_options,
+                multiple=True,
                 mode=selector.SelectSelectorMode.DROPDOWN,
             )
-        ),
-        vol.Required("effect", default=Effect.SOLID): selector.SelectSelector(
-            selector.SelectSelectorConfig(
-                options=EFFECT_OPTIONS,
-                mode=selector.SelectSelectorMode.DROPDOWN,
-            )
-        ),
-        vol.Required("effect_speed", default=DEFAULT_SPEED): selector.SelectSelector(
-            selector.SelectSelectorConfig(
-                options=SPEED_OPTIONS,
-                mode=selector.SelectSelectorMode.DROPDOWN,
-            )
-        ),
-        vol.Required("brightness", default=DEFAULT_BRIGHTNESS): selector.NumberSelector(
-            selector.NumberSelectorConfig(min=0, max=100, step=1, mode=selector.NumberSelectorMode.SLIDER)
-        ),
-        vol.Required("duration", default=0): selector.NumberSelector(
-            selector.NumberSelectorConfig(min=0, max=86400, step=1, unit_of_measurement="seconds")
-        ),
-        vol.Required("priority", default=DEFAULT_PRIORITY): selector.NumberSelector(
-            selector.NumberSelectorConfig(min=0, max=100, step=1, mode=selector.NumberSelectorMode.SLIDER)
-        ),
-        vol.Required("targets"): selector.EntitySelector(
+        )
+    else:
+        targets_selector = selector.EntitySelector(
             selector.EntitySelectorConfig(
                 domain=["light", "switch"],
                 multiple=True,
             )
-        ),
-    }
-)
+        )
+
+    return vol.Schema(
+        {
+            vol.Required("name"): selector.TextSelector(),
+            vol.Required("color", default="blue"): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=COLOR_OPTIONS,
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
+            vol.Required("effect", default=Effect.SOLID): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=EFFECT_OPTIONS,
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
+            vol.Required("effect_speed", default=DEFAULT_SPEED): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=SPEED_OPTIONS,
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
+            vol.Required("brightness", default=DEFAULT_BRIGHTNESS): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=100, step=1, mode=selector.NumberSelectorMode.SLIDER)
+            ),
+            vol.Required("duration", default=0): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=86400, step=1, unit_of_measurement="seconds")
+            ),
+            vol.Required("priority", default=DEFAULT_PRIORITY): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=100, step=1, mode=selector.NumberSelectorMode.SLIDER)
+            ),
+            vol.Required("targets"): targets_selector,
+        }
+    )
+
+
+def _find_supported_entities(hass) -> list[str]:
+    """Return entity IDs whose devices match a registered adapter."""
+    entity_reg = er.async_get(hass)
+    device_reg = dr.async_get(hass)
+
+    registry = AdapterRegistry()
+    registry.register(InovelliBlueZ2MAdapter(hass))
+
+    result = []
+    for entity_entry in entity_reg.entities.values():
+        if entity_entry.domain not in ("light", "switch"):
+            continue
+        if entity_entry.device_id is None:
+            continue
+        device_entry = device_reg.async_get(entity_entry.device_id)
+        if device_entry is None:
+            continue
+        adapter = registry.get_adapter(
+            device_entry.manufacturer or "", device_entry.model or ""
+        )
+        if adapter is not None:
+            result.append(entity_entry.entity_id)
+
+    _LOGGER.debug("Supported target entities: %s", result)
+    return result
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -142,9 +198,12 @@ class NotifyLightsOptionsFlow(OptionsFlowWithConfigEntry):
                 )
                 return self.async_create_entry(data={"notifications": notifications})
 
+        supported = _find_supported_entities(self.hass)
+        schema = _build_notification_schema(supported or None)
+
         return self.async_show_form(
             step_id="add",
-            data_schema=NOTIFICATION_SCHEMA,
+            data_schema=schema,
             errors=errors,
         )
 

@@ -105,7 +105,12 @@ class InovelliBlueZ2MAdapter(NotificationAdapter):
     """
 
     manufacturer = "Inovelli"
-    model_patterns = ["VZM31*", "VZM35*"]
+    model_patterns = [
+        "VZM31*",
+        "VZM35*",
+        "mmWave Zigbee Dimmer",
+        "2-in-1 switch + dimmer",
+    ]
     max_concurrent = 1
     supported_effects = set(Effect)
     effect_fallbacks: dict[Effect, Effect] = {}
