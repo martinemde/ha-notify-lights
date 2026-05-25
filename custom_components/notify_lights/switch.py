@@ -1,6 +1,8 @@
 """Switch entity for stateful (duration=0) notifications."""
 from __future__ import annotations
 
+import logging
+
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -8,6 +10,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .notification import Notification
+
+_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
@@ -19,11 +23,15 @@ async def async_setup_entry(
     coordinator = data["coordinator"]
     notifications = data["notifications"]
 
-    entities = [
-        NotificationSwitch(coordinator, notif)
-        for notif in notifications.values()
-        if notif.is_stateful
-    ]
+    stateful = [n for n in notifications.values() if n.is_stateful]
+    _LOGGER.info(
+        "Switch platform setup: %d stateful of %d total notifications",
+        len(stateful), len(notifications),
+    )
+    for n in stateful:
+        _LOGGER.debug("  switch: %s (priority=%d, targets=%s)", n.name, n.priority, n.targets)
+
+    entities = [NotificationSwitch(coordinator, notif) for notif in stateful]
     async_add_entities(entities)
 
 
@@ -42,9 +50,11 @@ class NotificationSwitch(SwitchEntity):
         return self._is_on
 
     async def async_turn_on(self, **kwargs) -> None:
+        _LOGGER.info("Switch %s turned ON", self._notification.name)
         self._is_on = True
         await self._coordinator.async_activate(self._notification)
 
     async def async_turn_off(self, **kwargs) -> None:
+        _LOGGER.info("Switch %s turned OFF", self._notification.name)
         self._is_on = False
         await self._coordinator.async_deactivate(self._notification)

@@ -1,6 +1,7 @@
 """Config flow for the Notify Lights integration."""
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import voluptuous as vol
@@ -77,18 +78,23 @@ NOTIFICATION_SCHEMA = vol.Schema(
 )
 
 
+_LOGGER = logging.getLogger(__name__)
+
+
 class NotifyLightsConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> dict[str, Any]:
+        _LOGGER.debug("Config flow user step: input=%s", user_input)
         if user_input is None:
             return self.async_show_form(step_id="user")
 
         await self.async_set_unique_id(DOMAIN)
         self._abort_if_unique_id_configured()
 
+        _LOGGER.info("Creating config entry for Notify Lights")
         return self.async_create_entry(
             title="Notify Lights",
             data={},
@@ -104,6 +110,10 @@ class NotifyLightsOptionsFlow(OptionsFlowWithConfigEntry):
         self, user_input: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         notifications = dict(self.options.get("notifications", {}))
+        _LOGGER.debug(
+            "Options flow init: %d existing notifications, input=%s",
+            len(notifications), user_input,
+        )
 
         if not notifications:
             return await self.async_step_add()
@@ -115,15 +125,21 @@ class NotifyLightsOptionsFlow(OptionsFlowWithConfigEntry):
         self, user_input: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         errors: dict[str, str] = {}
+        _LOGGER.debug("Options flow add step: input=%s", user_input)
 
         if user_input is not None:
             name = user_input["name"]
             notifications = dict(self.options.get("notifications", {}))
 
             if name in notifications:
+                _LOGGER.warning("Notification name %r already exists", name)
                 errors["name"] = "name_exists"
             else:
                 notifications[name] = user_input
+                _LOGGER.info(
+                    "Adding notification %r, saving %d total: %s",
+                    name, len(notifications), list(notifications.keys()),
+                )
                 return self.async_create_entry(data={"notifications": notifications})
 
         return self.async_show_form(
@@ -136,10 +152,18 @@ class NotifyLightsOptionsFlow(OptionsFlowWithConfigEntry):
         self, user_input: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         notifications = dict(self.options.get("notifications", {}))
+        _LOGGER.debug(
+            "Options flow remove step: input=%s, existing=%s",
+            user_input, list(notifications.keys()),
+        )
 
         if user_input is not None:
             name = user_input["name"]
             notifications.pop(name, None)
+            _LOGGER.info(
+                "Removed notification %r, %d remaining: %s",
+                name, len(notifications), list(notifications.keys()),
+            )
             return self.async_create_entry(data={"notifications": notifications})
 
         name_options = [
