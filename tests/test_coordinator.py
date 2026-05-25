@@ -11,6 +11,7 @@ from custom_components.notify_lights.const import Effect, Speed
 def _make_notif(name="test", priority=50, color=0, effect=Effect.SOLID):
     return Notification(
         name=name,
+        display_name=name.replace("_", " ").title(),
         color=color,
         brightness=100,
         effect=effect,
@@ -28,6 +29,7 @@ def _mock_hass_with_device(
     manufacturer="Inovelli", model="VZM31-SN", device_name="office_dimmer"
 ):
     hass = MagicMock()
+    hass.states.get.return_value = None
     entity_entry = MagicMock()
     entity_entry.device_id = "device_123"
     entity_registry = MagicMock()
@@ -154,6 +156,7 @@ async def test_unmatched_device_logs_and_skips():
 @pytest.mark.asyncio
 async def test_missing_entity_entry_logs_and_skips():
     hass = MagicMock()
+    hass.states.get.return_value = None
     entity_registry = MagicMock()
     entity_registry.async_get.return_value = None
     device_registry = MagicMock()
@@ -167,6 +170,7 @@ async def test_missing_entity_entry_logs_and_skips():
 @pytest.mark.asyncio
 async def test_missing_device_entry_skips():
     hass = MagicMock()
+    hass.states.get.return_value = None
     entity_entry = MagicMock()
     entity_entry.device_id = "device_123"
     entity_registry = MagicMock()
@@ -189,3 +193,103 @@ async def test_adapter_render_exception_is_caught():
     coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
     notif = _make_notif()
     await coordinator.async_activate(notif, TARGETS, POOL_ID)
+
+
+def _mock_group_hass(
+    group_entity_id="light.all_lights",
+    member_ids=None,
+    member_manufacturer="Inovelli",
+    member_model="VZM31-SN",
+):
+    """Build a mock hass where group_entity_id is a light group with members."""
+    if member_ids is None:
+        member_ids = ["light.device_1", "light.device_2"]
+
+    hass = MagicMock()
+
+    group_state = MagicMock()
+    group_state.attributes = {"entity_id": member_ids}
+
+    def states_get(entity_id):
+        if entity_id == group_entity_id:
+            return group_state
+        member_state = MagicMock()
+        member_state.attributes = {}
+        return member_state
+
+    hass.states.get = states_get
+
+    member_entity_entries = {}
+    member_device_entries = {}
+    for i, mid in enumerate(member_ids):
+        ent = MagicMock()
+        ent.device_id = f"dev_{i}"
+        member_entity_entries[mid] = ent
+        dev = MagicMock()
+        dev.manufacturer = member_manufacturer
+        dev.model = member_model
+        dev.name = f"device_{i}"
+        member_device_entries[f"dev_{i}"] = dev
+
+    entity_registry = MagicMock()
+    entity_registry.async_get = lambda eid: member_entity_entries.get(eid)
+
+    device_registry = MagicMock()
+    device_registry.async_get = lambda did: member_device_entries.get(did)
+
+    return hass, entity_registry, device_registry
+
+
+@pytest.mark.asyncio
+async def test_group_target_expands_to_member_devices():
+    hass, entity_reg, device_reg = _mock_group_hass()
+    registry = AdapterRegistry()
+    mock_adapter = _make_adapter()
+    registry.register(mock_adapter)
+    coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
+    notif = _make_notif()
+    await coordinator.async_activate(notif, ["light.all_lights"], POOL_ID)
+    assert mock_adapter.render.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_group_deactivate_clears_all_members():
+    hass, entity_reg, device_reg = _mock_group_hass()
+    registry = AdapterRegistry()
+    mock_adapter = _make_adapter()
+    registry.register(mock_adapter)
+    coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
+    notif = _make_notif()
+    await coordinator.async_activate(notif, ["light.all_lights"], POOL_ID)
+    mock_adapter.render.reset_mock()
+    await coordinator.async_deactivate(notif, ["light.all_lights"], POOL_ID)
+    assert mock_adapter.render.call_count == 2
+    for call in mock_adapter.render.call_args_list:
+        assert len(call[0][1]) == 0
+
+
+@pytest.mark.asyncio
+async def test_group_skips_unsupported_members():
+    hass, entity_reg, device_reg = _mock_group_hass(
+        member_ids=["light.supported", "light.unsupported"],
+    )
+    original_dev_get = device_reg.async_get
+    unsupported_dev = MagicMock()
+    unsupported_dev.manufacturer = "Unknown"
+    unsupported_dev.model = "XYZ"
+    unsupported_dev.name = "unsupported"
+
+    def patched_dev_get(device_id):
+        if device_id == "dev_1":
+            return unsupported_dev
+        return original_dev_get(device_id)
+
+    device_reg.async_get = patched_dev_get
+
+    registry = AdapterRegistry()
+    mock_adapter = _make_adapter()
+    registry.register(mock_adapter)
+    coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
+    notif = _make_notif()
+    await coordinator.async_activate(notif, ["light.all_lights"], POOL_ID)
+    assert mock_adapter.render.call_count == 1
