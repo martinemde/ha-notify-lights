@@ -3,8 +3,12 @@
     "step": {
       "user": {
         "title": "Notify Lights",
-        "description": "Set up Notify Lights to control LED notifications on your smart switches."
+        "description": "Set up Notify Lights to control LED notifications on your smart switches.",
+        "data": {}
       }
+    },
+    "abort": {
+      "already_configured": "Notify Lights is already configured."
     }
   }
 }
