@@ -2,26 +2,40 @@
 from __future__ import annotations
 
 from homeassistant.components.switch import SwitchEntity
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .const import DOMAIN
 from .notification import Notification
 
 
-class NotificationSwitch(SwitchEntity):
-    """Represents a persistent notification as a HA switch.
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    data = hass.data[DOMAIN][entry.entry_id]
+    coordinator = data["coordinator"]
+    notifications = data["notifications"]
 
-    Turning the switch on activates the notification; turning it off
-    deactivates it. State is owned by this entity and reflected back to
-    Home Assistant via is_on.
-    """
+    entities = [
+        NotificationSwitch(coordinator, notif)
+        for notif in notifications.values()
+        if notif.is_stateful
+    ]
+    async_add_entities(entities)
+
+
+class NotificationSwitch(SwitchEntity):
+    _attr_has_entity_name = True
 
     def __init__(self, coordinator, notification: Notification) -> None:
         self._coordinator = coordinator
         self._notification = notification
         self._is_on = False
         self._attr_unique_id = f"notify_lights_{notification.name}"
-        self._attr_name = (
-            f"Notify {notification.name.replace('_', ' ')}"
-        )
+        self._attr_name = f"Notify {notification.name.replace('_', ' ')}"
 
     @property
     def is_on(self) -> bool:

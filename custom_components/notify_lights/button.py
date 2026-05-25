@@ -2,13 +2,34 @@
 from __future__ import annotations
 
 from homeassistant.components.button import ButtonEntity
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_call_later
 
+from .const import DOMAIN
 from .notification import Notification
 
 
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    data = hass.data[DOMAIN][entry.entry_id]
+    coordinator = data["coordinator"]
+    notifications = data["notifications"]
+
+    entities = [
+        NotificationButton(coordinator, notif, hass)
+        for notif in notifications.values()
+        if notif.is_momentary
+    ]
+    async_add_entities(entities)
+
+
 class NotificationButton(ButtonEntity):
-    """Button that triggers a momentary notification and auto-deactivates."""
+    _attr_has_entity_name = True
 
     def __init__(self, coordinator, notification: Notification, hass) -> None:
         self._coordinator = coordinator
@@ -19,7 +40,6 @@ class NotificationButton(ButtonEntity):
         self._attr_name = f"Notify {notification.name.replace('_', ' ')}"
 
     async def async_press(self, **kwargs) -> None:
-        """Activate the notification and schedule auto-deactivation."""
         if self._cancel_timer is not None:
             self._cancel_timer()
             self._cancel_timer = None
@@ -33,6 +53,5 @@ class NotificationButton(ButtonEntity):
         )
 
     async def _auto_deactivate(self, _now=None) -> None:
-        """Deactivate the notification after the timer expires."""
         self._cancel_timer = None
         await self._coordinator.async_deactivate(self._notification)

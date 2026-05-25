@@ -5,11 +5,7 @@ from unittest.mock import MagicMock
 
 
 class _ConfigFlow:
-    """Minimal stub for homeassistant.config_entries.ConfigFlow.
-
-    Supports the metaclass-style `domain=` keyword used in subclass definitions:
-        class MyFlow(ConfigFlow, domain=DOMAIN): ...
-    """
+    """Minimal stub for homeassistant.config_entries.ConfigFlow."""
 
     def __init_subclass__(cls, domain=None, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -29,9 +25,27 @@ class _ConfigFlow:
         pass
 
 
-# Build a stub module for homeassistant.config_entries that exposes ConfigFlow
-_config_entries_stub = MagicMock()
+class _OptionsFlowWithConfigEntry:
+    """Minimal stub for OptionsFlowWithConfigEntry."""
+
+    def __init__(self, config_entry=None):
+        self.config_entry = config_entry
+        self.options = getattr(config_entry, "options", {}) if config_entry else {}
+
+    def async_show_form(self, *, step_id, data_schema=None, errors=None):
+        return {"type": "form", "step_id": step_id}
+
+    def async_create_entry(self, *, data, title=""):
+        return {"type": "create_entry", "data": data}
+
+    def async_show_menu(self, *, step_id, menu_options):
+        return {"type": "menu", "step_id": step_id, "menu_options": menu_options}
+
+
+_config_entries_stub = types.ModuleType("homeassistant.config_entries")
 _config_entries_stub.ConfigFlow = _ConfigFlow
+_config_entries_stub.ConfigEntry = MagicMock
+_config_entries_stub.OptionsFlowWithConfigEntry = _OptionsFlowWithConfigEntry
 
 # Stub homeassistant modules before any component imports
 for module in [
@@ -40,19 +54,28 @@ for module in [
     "homeassistant.helpers",
     "homeassistant.helpers.entity_registry",
     "homeassistant.helpers.device_registry",
+    "homeassistant.helpers.entity_platform",
+    "homeassistant.helpers.selector",
 ]:
     sys.modules.setdefault(module, MagicMock())
 
 sys.modules["homeassistant.config_entries"] = _config_entries_stub
 
-# Stub homeassistant.components.switch so NotificationSwitch can be imported
-# without a real HA installation.
+# Stub voluptuous (used by config_flow for form schemas)
+if "voluptuous" not in sys.modules:
+    _vol = MagicMock()
+    _vol.Schema = MagicMock(side_effect=lambda schema: schema)
+    _vol.Required = MagicMock(side_effect=lambda key, **kw: key)
+    sys.modules["voluptuous"] = _vol
+
+# Switch entity stub
 _switch_module = types.ModuleType("homeassistant.components.switch")
 
 
 class _SwitchEntity:
     _attr_unique_id = None
     _attr_name = None
+    _attr_has_entity_name = False
 
     @property
     def unique_id(self):
@@ -76,6 +99,7 @@ _button_module = types.ModuleType("homeassistant.components.button")
 class _ButtonEntity:
     _attr_unique_id = None
     _attr_name = None
+    _attr_has_entity_name = False
 
     @property
     def unique_id(self):

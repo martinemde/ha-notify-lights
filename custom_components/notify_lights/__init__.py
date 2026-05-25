@@ -1,13 +1,37 @@
+"""Notify Lights — LED notifications as HA entities."""
+from __future__ import annotations
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import entity_registry as er, device_registry as dr
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 
 from .adapter import AdapterRegistry
 from .adapters.inovelli_blue_z2m import InovelliBlueZ2MAdapter
-from .const import DOMAIN
+from .const import DOMAIN, Effect, Speed, NAMED_COLORS
 from .coordinator import NotifyLightsCoordinator
+from .notification import Notification
 
 PLATFORMS = ["switch", "button"]
+
+
+def notifications_from_options(options: dict) -> dict[str, Notification]:
+    """Build Notification objects from config entry options."""
+    result: dict[str, Notification] = {}
+    for name, config in options.get("notifications", {}).items():
+        color = config["color"]
+        if color in NAMED_COLORS:
+            color = NAMED_COLORS[color]
+        result[name] = Notification(
+            name=name,
+            color=color,
+            brightness=int(config["brightness"]),
+            effect=Effect(config["effect"]),
+            effect_speed=Speed(config["effect_speed"]),
+            duration=int(config["duration"]),
+            priority=int(config["priority"]),
+            targets=config["targets"],
+        )
+    return result
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -20,10 +44,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = NotifyLightsCoordinator(
         hass, adapter_registry, entity_registry, device_registry
     )
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+
+    notifications = notifications_from_options(entry.options)
+
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "coordinator": coordinator,
+        "notifications": notifications,
+    }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
+
+
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
