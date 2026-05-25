@@ -1,0 +1,74 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Create Notification Pool",
+        "description": "A notification pool targets a set of lights and switches for LED notifications. Give your pool a name and select the devices or entities to include.",
+        "data": {
+          "name": "Pool name",
+          "targets": "Target devices"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "description": "This pool targets a set of lights for LED notifications. Configure the target devices and manage notifications below.",
+        "menu_options": {
+          "targets": "Targets",
+          "add": "Add notification",
+          "modify": "Modify notification",
+          "delete": "Delete notification"
+        }
+      },
+      "targets": {
+        "title": "Targets",
+        "description": "Choose which devices and entities this pool targets for notifications.",
+        "data": {
+          "targets": "Target devices"
+        }
+      },
+      "add": {
+        "title": "Add Notification",
+        "description": "Define a new LED notification. Duration 0 = stateful (switch), duration > 0 = momentary (button).",
+        "data": {
+          "name": "Name",
+          "color": "Color",
+          "effect": "Effect",
+          "effect_speed": "Speed",
+          "brightness": "Brightness",
+          "duration": "Duration (seconds, 0 = stays on)",
+          "priority": "Priority"
+        }
+      },
+      "modify": {
+        "title": "Modify Notification",
+        "data": {
+          "slug": "Notification to modify"
+        }
+      },
+      "modify_form": {
+        "title": "Edit Notification",
+        "data": {
+          "name": "Display name",
+          "color": "Color",
+          "effect": "Effect",
+          "effect_speed": "Speed",
+          "brightness": "Brightness",
+          "duration": "Duration (seconds, 0 = stays on)",
+          "priority": "Priority"
+        }
+      },
+      "delete": {
+        "title": "Delete Notification",
+        "data": {
+          "slug": "Notification to delete"
+        }
+      }
+    },
+    "error": {
+      "name_exists": "A notification with this name already exists."
+    }
+  }
+}
