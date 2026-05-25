@@ -6,6 +6,7 @@ import logging
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -54,6 +55,9 @@ class NotificationSwitch(SwitchEntity):
         self._is_on = False
         self._attr_unique_id = f"notify_lights_{entry_id}_{notification.name}"
         self._attr_name = f"Notify {notification.name.replace('_', ' ')}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry_id)},
+        )
 
     @property
     def is_on(self) -> bool:
