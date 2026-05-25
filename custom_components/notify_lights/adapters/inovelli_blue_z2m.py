@@ -16,8 +16,12 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
+import logging
+
 from ..adapter import NotificationAdapter
 from ..const import Effect, Speed
+
+_LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -121,31 +125,33 @@ class InovelliBlueZ2MAdapter(NotificationAdapter):
     async def render(self, target: str, active: list[ActiveEntry]) -> None:
         """Publish the top-priority notification or clear if none active."""
         if not active:
+            _LOGGER.info("No active notifications for %s, clearing", target)
             await self.clear(target)
             return
 
         # active[0] is the highest-priority entry (sorted by ActiveSet)
         notification, _score = active[0]
         payload = _build_led_effect_payload(notification)
+        _LOGGER.info(
+            "Publishing led_effect to %s: %s", target, payload,
+        )
         await self._publish(target, payload)
 
     async def clear(self, target: str) -> None:
         """Send a clear_effect to remove all notification LEDs."""
+        topic = f"zigbee2mqtt/{target}/set"
+        _LOGGER.info("Clearing LED on %s: topic=%s", target, topic)
         await self._hass.services.async_call(
             "mqtt",
             "publish",
-            {
-                "topic": f"zigbee2mqtt/{target}/set",
-                "payload": _CLEAR_PAYLOAD,
-            },
+            {"topic": topic, "payload": _CLEAR_PAYLOAD},
         )
 
     async def _publish(self, target: str, payload: dict) -> None:
+        topic = f"zigbee2mqtt/{target}/set"
+        _LOGGER.debug("MQTT publish: topic=%s payload=%s", topic, json.dumps(payload))
         await self._hass.services.async_call(
             "mqtt",
             "publish",
-            {
-                "topic": f"zigbee2mqtt/{target}/set",
-                "payload": json.dumps(payload),
-            },
+            {"topic": topic, "payload": json.dumps(payload)},
         )

@@ -44,18 +44,32 @@ class NotifyLightsCoordinator:
     async def async_activate(self, notification: Notification) -> None:
         """Add notification to each target's active set and re-render."""
         activated_at = time.monotonic()
-        for target in self._resolve_targets(notification.targets):
+        targets = self._resolve_targets(notification.targets)
+        _LOGGER.info(
+            "Activating %s on %d targets: %s",
+            notification.name, len(targets), targets,
+        )
+        for target in targets:
             entries = self._active.setdefault(target, [])
             entries.append((notification, activated_at))
             await self._render_target(target)
 
     async def async_deactivate(self, notification: Notification) -> None:
         """Remove notification from each target's active set and re-render."""
-        for target in self._resolve_targets(notification.targets):
+        targets = self._resolve_targets(notification.targets)
+        _LOGGER.info(
+            "Deactivating %s on %d targets: %s",
+            notification.name, len(targets), targets,
+        )
+        for target in targets:
             entries = self._active.get(target, [])
             self._active[target] = [
                 (n, t) for n, t in entries if n.name != notification.name
             ]
+            _LOGGER.debug(
+                "Target %s: %d remaining active notifications",
+                target, len(self._active[target]),
+            )
             await self._render_target(target)
 
     def _resolve_targets(self, targets: list[str]) -> list[str]:
@@ -104,6 +118,12 @@ class NotifyLightsCoordinator:
 
         active_set = compute_active_set(self._active.get(target_entity_id, []))
         friendly_name = device_entry.name
+
+        _LOGGER.info(
+            "Rendering %s (%s): %d active notifications, adapter=%s",
+            target_entity_id, friendly_name, len(active_set),
+            type(adapter).__name__,
+        )
 
         try:
             await adapter.render(friendly_name, active_set)
