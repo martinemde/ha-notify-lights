@@ -7,6 +7,7 @@ from custom_components.notify_lights.const import Effect, Speed
 def test_create_notification_with_all_fields():
     n = Notification(
         name="heating",
+        display_name="Heating",
         color=120,
         brightness=80,
         effect=Effect.PULSE,
@@ -22,6 +23,7 @@ def test_create_notification_with_all_fields():
 def test_named_color_resolves_to_hue():
     n = Notification(
         name="test",
+        display_name="Test",
         color="blue",
         brightness=100,
         effect=Effect.SOLID,
@@ -35,7 +37,7 @@ def test_named_color_resolves_to_hue():
 def test_hue_out_of_range_raises():
     with pytest.raises(ValueError):
         Notification(
-            name="test", color=400, brightness=100,
+            name="test", display_name="Test", color=400, brightness=100,
             effect=Effect.SOLID, effect_speed=Speed.MEDIUM,
             duration=0, priority=50,
         )
@@ -43,7 +45,7 @@ def test_hue_out_of_range_raises():
 
 def test_stateful_when_duration_zero():
     n = Notification(
-        name="test", color=0, brightness=100,
+        name="test", display_name="Test", color=0, brightness=100,
         effect=Effect.SOLID, effect_speed=Speed.MEDIUM,
         duration=0, priority=50,
     )
@@ -53,7 +55,7 @@ def test_stateful_when_duration_zero():
 
 def test_momentary_when_duration_positive():
     n = Notification(
-        name="test", color=0, brightness=100,
+        name="test", display_name="Test", color=0, brightness=100,
         effect=Effect.SOLID, effect_speed=Speed.MEDIUM,
         duration=10, priority=50,
     )

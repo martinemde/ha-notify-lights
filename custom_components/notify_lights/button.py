@@ -33,7 +33,7 @@ async def async_setup_entry(
     )
 
     entities = [
-        NotificationButton(coordinator, notif, targets, entry.entry_id, hass)
+        NotificationButton(coordinator, notif, targets, entry, hass)
         for notif in momentary
     ]
     async_add_entities(entities)
@@ -47,19 +47,21 @@ class NotificationButton(ButtonEntity):
         coordinator,
         notification: Notification,
         targets: list[str],
-        entry_id: str,
+        entry: ConfigEntry,
         hass,
     ) -> None:
         self._coordinator = coordinator
         self._notification = notification
         self._targets = targets
-        self._entry_id = entry_id
+        self._entry_id = entry.entry_id
         self._hass = hass
         self._cancel_timer = None
-        self._attr_unique_id = f"notify_lights_{entry_id}_{notification.name}"
-        self._attr_name = f"Notify {notification.name.replace('_', ' ')}"
+        self._attr_unique_id = (
+            f"notify_lights_{entry.entry_id}_{notification.name}"
+        )
+        self._attr_name = notification.display_name
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry_id)},
+            identifiers={(DOMAIN, entry.entry_id)},
         )
 
     async def async_press(self, **kwargs) -> None:

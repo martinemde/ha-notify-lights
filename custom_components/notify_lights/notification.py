@@ -8,6 +8,7 @@ from .const import Effect, Speed, NAMED_COLORS
 @dataclass(frozen=True)
 class Notification:
     name: str
+    display_name: str
     color: int | str
     brightness: int
     effect: Effect

@@ -6,7 +6,8 @@ from custom_components.notify_lights.const import Effect, Speed
 def _notif(name, priority=50, duration=0, activated_at=0.0):
     return (
         Notification(
-            name=name, color=0, brightness=100,
+            name=name, display_name=name.replace("_", " ").title(),
+            color=0, brightness=100,
             effect=Effect.SOLID, effect_speed=Speed.MEDIUM,
             duration=duration, priority=priority,
         ),

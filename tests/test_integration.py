@@ -33,6 +33,13 @@ POOL_A = "pool_entry_a"
 POOL_B = "pool_entry_b"
 
 
+def _make_entry(entry_id, name="Test Pool"):
+    entry = MagicMock()
+    entry.entry_id = entry_id
+    entry.data = {"name": name}
+    return entry
+
+
 def _make_registries(device_name="office_dimmer"):
     entity_entry = MagicMock()
     entity_entry.device_id = "device_123"
@@ -51,6 +58,7 @@ def _make_registries(device_name="office_dimmer"):
 async def test_switch_round_trip():
     """Full round-trip: switch on -> adapter renders -> switch off -> adapter clears."""
     hass = MagicMock()
+    hass.states.get.return_value = None
     entity_reg, device_reg = _make_registries("office_dimmer")
     adapter = MockAdapter()
     registry = AdapterRegistry()
@@ -58,12 +66,13 @@ async def test_switch_round_trip():
     coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
 
     notif = Notification(
-        name="heating", color=120, brightness=80,
+        name="heating", display_name="Heating", color=120, brightness=80,
         effect=Effect.PULSE, effect_speed=Speed.FAST,
         duration=0, priority=50,
     )
 
-    switch = NotificationSwitch(coordinator, notif, TARGETS, POOL_A)
+    entry = _make_entry(POOL_A)
+    switch = NotificationSwitch(coordinator, notif, TARGETS, entry)
 
     await switch.async_turn_on()
     assert switch.is_on is True
@@ -85,6 +94,7 @@ async def test_switch_round_trip():
 async def test_button_activates_and_schedules_deactivation():
     """Button press -> adapter renders -> timer fires -> adapter clears."""
     hass = MagicMock()
+    hass.states.get.return_value = None
     entity_reg, device_reg = _make_registries("kitchen_switch")
     adapter = MockAdapter()
     registry = AdapterRegistry()
@@ -92,7 +102,8 @@ async def test_button_activates_and_schedules_deactivation():
     coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
 
     notif = Notification(
-        name="doorbell_flash", color=0, brightness=100,
+        name="doorbell_flash", display_name="Doorbell Flash",
+        color=0, brightness=100,
         effect=Effect.BLINK, effect_speed=Speed.FAST,
         duration=5, priority=90,
     )
@@ -106,7 +117,8 @@ async def test_button_activates_and_schedules_deactivation():
         assert delay == 5
         return MagicMock()
 
-    button = NotificationButton(coordinator, notif, targets, POOL_A, hass)
+    entry = _make_entry(POOL_A)
+    button = NotificationButton(coordinator, notif, targets, entry, hass)
 
     with patch("custom_components.notify_lights.button.async_call_later", side_effect=fake_call_later):
         await button.async_press()
@@ -128,6 +140,7 @@ async def test_button_activates_and_schedules_deactivation():
 async def test_cross_pool_priority_on_shared_switch():
     """Two pools targeting the same switch resolve by priority."""
     hass = MagicMock()
+    hass.states.get.return_value = None
     entity_reg, device_reg = _make_registries("office_dimmer")
     adapter = MockAdapter()
     registry = AdapterRegistry()
@@ -135,18 +148,22 @@ async def test_cross_pool_priority_on_shared_switch():
     coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
 
     low = Notification(
-        name="background", color=120, brightness=50,
+        name="background", display_name="Background",
+        color=120, brightness=50,
         effect=Effect.SOLID, effect_speed=Speed.MEDIUM,
         duration=0, priority=10,
     )
     high = Notification(
-        name="urgent_alert", color=0, brightness=100,
+        name="urgent_alert", display_name="Urgent Alert",
+        color=0, brightness=100,
         effect=Effect.BLINK, effect_speed=Speed.FAST,
         duration=0, priority=90,
     )
 
-    switch_low = NotificationSwitch(coordinator, low, TARGETS, POOL_A)
-    switch_high = NotificationSwitch(coordinator, high, TARGETS, POOL_B)
+    entry_a = _make_entry(POOL_A)
+    entry_b = _make_entry(POOL_B)
+    switch_low = NotificationSwitch(coordinator, low, TARGETS, entry_a)
+    switch_high = NotificationSwitch(coordinator, high, TARGETS, entry_b)
 
     await switch_low.async_turn_on()
     await switch_high.async_turn_on()
@@ -165,6 +182,7 @@ async def test_cross_pool_priority_on_shared_switch():
 async def test_same_notification_different_pools_independent():
     """Same notification name from two pools are tracked independently."""
     hass = MagicMock()
+    hass.states.get.return_value = None
     entity_reg, device_reg = _make_registries("office_dimmer")
     adapter = MockAdapter()
     registry = AdapterRegistry()
@@ -172,13 +190,16 @@ async def test_same_notification_different_pools_independent():
     coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
 
     notif = Notification(
-        name="heating", color=120, brightness=80,
+        name="heating", display_name="Heating",
+        color=120, brightness=80,
         effect=Effect.SOLID, effect_speed=Speed.MEDIUM,
         duration=0, priority=50,
     )
 
-    switch_a = NotificationSwitch(coordinator, notif, TARGETS, POOL_A)
-    switch_b = NotificationSwitch(coordinator, notif, TARGETS, POOL_B)
+    entry_a = _make_entry(POOL_A)
+    entry_b = _make_entry(POOL_B)
+    switch_a = NotificationSwitch(coordinator, notif, TARGETS, entry_a)
+    switch_b = NotificationSwitch(coordinator, notif, TARGETS, entry_b)
 
     await switch_a.async_turn_on()
     await switch_b.async_turn_on()

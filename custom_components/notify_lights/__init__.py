@@ -76,6 +76,7 @@ def notifications_from_options(options: dict) -> dict[str, Notification]:
             color = NAMED_COLORS[color]
         result[slug] = Notification(
             name=slug,
+            display_name=config.get("display_name", slug.replace("_", " ")),
             color=color,
             brightness=int(config["brightness"]),
             effect=Effect(config["effect"]),

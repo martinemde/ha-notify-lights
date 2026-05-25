@@ -59,6 +59,7 @@ def _make_notif(
 ):
     return Notification(
         name=name,
+        display_name=name.replace("_", " ").title(),
         color=color,
         brightness=brightness,
         effect=effect,
