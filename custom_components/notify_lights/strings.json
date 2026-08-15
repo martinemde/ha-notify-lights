@@ -2,11 +2,10 @@
   "config": {
     "step": {
       "user": {
-        "title": "Create Notification Pool",
-        "description": "A notification pool targets a set of lights and switches for LED notifications. Give your pool a name and select the devices or entities to include.",
+        "title": "Create Notification Catalog",
+        "description": "A catalog holds your LED notifications. Each notification defines what it means, what it looks like, and which lights show it. Give the catalog a name; you'll add notifications next.",
         "data": {
-          "name": "Pool name",
-          "targets": "Target devices"
+          "name": "Catalog name"
         }
       }
     }
@@ -14,26 +13,21 @@
   "options": {
     "step": {
       "init": {
-        "description": "This pool targets a set of lights for LED notifications. Configure the target devices and manage notifications below.",
+        "description": "Add, modify or delete notifications in this catalog.",
         "menu_options": {
-          "targets": "Targets",
           "add": "Add notification",
           "modify": "Modify notification",
           "delete": "Delete notification"
         }
       },
-      "targets": {
-        "title": "Targets",
-        "description": "Choose which devices and entities this pool targets for notifications.",
-        "data": {
-          "targets": "Target devices"
-        }
-      },
       "add": {
         "title": "Add Notification",
-        "description": "Define a new LED notification. Duration 0 = stateful (switch), duration > 0 = momentary (button).",
+        "description": "Define a new LED notification. Duration 0 = stateful (a switch you hold on); duration > 0 = momentary (a button that clears itself). Target areas or light groups rather than individual switches where you can, so the notification keeps working as switches are added.",
         "data": {
           "name": "Name",
+          "description": "What this means",
+          "targets": "Show on",
+          "exclude": "Except",
           "color": "Color",
           "effect": "Effect",
           "effect_speed": "Speed",
@@ -50,8 +44,12 @@
       },
       "modify_form": {
         "title": "Edit Notification",
+        "description": "Renaming changes the display name only; the entity ID stays the same so existing automations keep working.",
         "data": {
           "name": "Display name",
+          "description": "What this means",
+          "targets": "Show on",
+          "exclude": "Except",
           "color": "Color",
           "effect": "Effect",
           "effect_speed": "Speed",

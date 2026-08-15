@@ -1,4 +1,15 @@
-"""Config flow for the Notify Lights integration."""
+"""Config flow for the Notify Lights integration.
+
+A config entry is a *catalog* of notifications. Each notification carries its
+own targets, so it is a complete, self-describing thing: name, meaning,
+appearance, priority, and where it shows.
+
+Targets live on the notification rather than on the entry because a stateful
+notification is a `switch` entity, and a switch cannot take call-time
+parameters -- so the definition is the only place its targets can live. The
+earlier "pool owns the targets" model forced the same notification to be
+redefined once per pool, and those copies drifted.
+"""
 from __future__ import annotations
 
 import logging
@@ -51,25 +62,84 @@ def _slugify(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
 
 
-def _notification_schema() -> vol.Schema:
-    """Build the notification form schema (no targets — pool owns them)."""
+def _target_selector() -> selector.TargetSelector:
+    """A selector accepting any mix of entities, devices and areas."""
+    return selector.TargetSelector(
+        selector.TargetSelectorConfig(entity=[TARGET_ENTITY_FILTER])
+    )
+
+
+def notification_config(slug: str, user_input: dict[str, Any]) -> dict[str, Any]:
+    """Build the stored notification config from submitted form data."""
+    return {
+        "slug": slug,
+        "display_name": user_input["name"],
+        "description": user_input.get("description", ""),
+        "targets": user_input.get("targets", {}),
+        "exclude": user_input.get("exclude", {}),
+        "color": user_input["color"],
+        "effect": user_input["effect"],
+        "effect_speed": user_input["effect_speed"],
+        "brightness": int(user_input["brightness"]),
+        "duration": int(user_input["duration"]),
+        "priority": int(user_input["priority"]),
+    }
+
+
+def _notification_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
+    """Build the add/modify form schema, pre-filled from `defaults`.
+
+    Used for both steps so the two forms cannot drift apart.
+    """
+    current = defaults or {}
+    name_key = (
+        vol.Required("name", default=current["display_name"])
+        if "display_name" in current
+        else vol.Required("name")
+    )
+
     return vol.Schema(
         {
-            vol.Required("name"): selector.TextSelector(),
-            vol.Required("color", default="blue"): selector.SelectSelector(
+            name_key: selector.TextSelector(),
+            # What this notification means. display_name doubles as the UI
+            # label, so it cannot carry a sentence; this is what makes the
+            # catalog readable months later.
+            vol.Optional(
+                "description", default=current.get("description", "")
+            ): selector.TextSelector(
+                selector.TextSelectorConfig(multiline=True)
+            ),
+            # Where it shows. Entities, devices and areas may be mixed; group
+            # entities are expanded to their members downstream, so a single
+            # area light group covers a whole room and keeps working as
+            # switches are added to it.
+            vol.Required(
+                "targets", default=current.get("targets", {})
+            ): _target_selector(),
+            # Subtracted from targets. This is what makes "the whole house
+            # except the kids' rooms" expressible without enumerating every
+            # switch that should light up.
+            vol.Optional(
+                "exclude", default=current.get("exclude", {})
+            ): _target_selector(),
+            vol.Required(
+                "color", default=current.get("color", "blue")
+            ): selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=COLOR_OPTIONS,
                     mode=selector.SelectSelectorMode.DROPDOWN,
                 )
             ),
-            vol.Required("effect", default=Effect.SOLID): selector.SelectSelector(
+            vol.Required(
+                "effect", default=current.get("effect", Effect.SOLID)
+            ): selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=EFFECT_OPTIONS,
                     mode=selector.SelectSelectorMode.DROPDOWN,
                 )
             ),
             vol.Required(
-                "effect_speed", default=DEFAULT_SPEED
+                "effect_speed", default=current.get("effect_speed", DEFAULT_SPEED)
             ): selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=SPEED_OPTIONS,
@@ -77,7 +147,7 @@ def _notification_schema() -> vol.Schema:
                 )
             ),
             vol.Required(
-                "brightness", default=DEFAULT_BRIGHTNESS
+                "brightness", default=current.get("brightness", DEFAULT_BRIGHTNESS)
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0,
@@ -86,7 +156,12 @@ def _notification_schema() -> vol.Schema:
                     mode=selector.NumberSelectorMode.SLIDER,
                 )
             ),
-            vol.Required("duration", default=0): selector.NumberSelector(
+            # 0 makes the notification stateful (a switch, held until turned
+            # off); anything else makes it momentary (a button that clears
+            # itself after this many seconds).
+            vol.Required(
+                "duration", default=current.get("duration", 0)
+            ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0,
                     max=86400,
@@ -95,7 +170,7 @@ def _notification_schema() -> vol.Schema:
                 )
             ),
             vol.Required(
-                "priority", default=DEFAULT_PRIORITY
+                "priority", default=current.get("priority", DEFAULT_PRIORITY)
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0,
@@ -109,7 +184,7 @@ def _notification_schema() -> vol.Schema:
 
 
 class NotifyLightsConfigFlow(ConfigFlow, domain=DOMAIN):
-    VERSION = 1
+    VERSION = 2
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -120,26 +195,17 @@ class NotifyLightsConfigFlow(ConfigFlow, domain=DOMAIN):
                 data_schema=vol.Schema(
                     {
                         vol.Required(
-                            "name", default="Home Notify Lights"
+                            "name", default="Notify Lights"
                         ): selector.TextSelector(),
-                        vol.Required("targets"): selector.TargetSelector(
-                            selector.TargetSelectorConfig(
-                                entity=[TARGET_ENTITY_FILTER],
-                            )
-                        ),
                     }
                 ),
             )
 
         name = user_input["name"]
-        targets = user_input["targets"]
-        _LOGGER.info("Creating pool %r with targets %s", name, targets)
+        _LOGGER.info("Creating notification catalog %r", name)
         return self.async_create_entry(
             title=name,
-            data={
-                "name": name,
-                "targets": targets,
-            },
+            data={"name": name},
             options={"notifications": {}},
         )
 
@@ -159,36 +225,8 @@ class NotifyLightsOptionsFlow(OptionsFlowWithConfigEntry):
         if not notifications:
             return await self.async_step_add()
 
-        menu_options = ["targets", "add", "modify", "delete"]
         return self.async_show_menu(
-            step_id="init", menu_options=menu_options
-        )
-
-    async def async_step_targets(
-        self, user_input: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
-        if user_input is not None:
-            new_data = dict(self.config_entry.data)
-            new_data["targets"] = user_input["targets"]
-            self.hass.config_entries.async_update_entry(
-                self.config_entry, data=new_data
-            )
-            return self.async_create_entry(data=dict(self.options))
-
-        current = self.config_entry.data
-        return self.async_show_form(
-            step_id="targets",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        "targets", default=current.get("targets", {})
-                    ): selector.TargetSelector(
-                        selector.TargetSelectorConfig(
-                            entity=[TARGET_ENTITY_FILTER],
-                        )
-                    ),
-                }
-            ),
+            step_id="init", menu_options=["add", "modify", "delete"]
         )
 
     async def async_step_add(
@@ -204,16 +242,7 @@ class NotifyLightsOptionsFlow(OptionsFlowWithConfigEntry):
             if slug in notifications:
                 errors["name"] = "name_exists"
             else:
-                notifications[slug] = {
-                    "slug": slug,
-                    "display_name": name,
-                    "color": user_input["color"],
-                    "effect": user_input["effect"],
-                    "effect_speed": user_input["effect_speed"],
-                    "brightness": int(user_input["brightness"]),
-                    "duration": int(user_input["duration"]),
-                    "priority": int(user_input["priority"]),
-                }
+                notifications[slug] = notification_config(slug, user_input)
                 _LOGGER.info("Added notification %r (slug=%r)", name, slug)
                 return self.async_create_entry(
                     data={"notifications": notifications}
@@ -234,18 +263,13 @@ class NotifyLightsOptionsFlow(OptionsFlowWithConfigEntry):
             self._modify_slug = user_input["slug"]
             return await self.async_step_modify_form()
 
-        slug_options = [
-            selector.SelectOptionDict(value=slug, label=cfg["display_name"])
-            for slug, cfg in notifications.items()
-        ]
-
         return self.async_show_form(
             step_id="modify",
             data_schema=vol.Schema(
                 {
                     vol.Required("slug"): selector.SelectSelector(
                         selector.SelectSelectorConfig(
-                            options=slug_options,
+                            options=_slug_options(notifications),
                             mode=selector.SelectSelectorMode.DROPDOWN,
                         )
                     ),
@@ -256,87 +280,22 @@ class NotifyLightsOptionsFlow(OptionsFlowWithConfigEntry):
     async def async_step_modify_form(
         self, user_input: dict[str, Any] | None = None
     ) -> dict[str, Any]:
+        slug = self._modify_slug
+
         if user_input is not None:
             notifications = dict(self.options.get("notifications", {}))
-            slug = self._modify_slug
-            notifications[slug] = {
-                "slug": slug,
-                "display_name": user_input["name"],
-                "color": user_input["color"],
-                "effect": user_input["effect"],
-                "effect_speed": user_input["effect_speed"],
-                "brightness": int(user_input["brightness"]),
-                "duration": int(user_input["duration"]),
-                "priority": int(user_input["priority"]),
-            }
+            # Keep the original slug so the entity_id survives a rename of the
+            # display name -- callers reference the entity, not the label.
+            notifications[slug] = notification_config(slug, user_input)
             _LOGGER.info("Modified notification slug=%r", slug)
             return self.async_create_entry(
                 data={"notifications": notifications}
             )
 
-        current = self.options["notifications"][self._modify_slug]
         return self.async_show_form(
             step_id="modify_form",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        "name", default=current["display_name"]
-                    ): selector.TextSelector(),
-                    vol.Required(
-                        "color", default=current["color"]
-                    ): selector.SelectSelector(
-                        selector.SelectSelectorConfig(
-                            options=COLOR_OPTIONS,
-                            mode=selector.SelectSelectorMode.DROPDOWN,
-                        )
-                    ),
-                    vol.Required(
-                        "effect", default=current["effect"]
-                    ): selector.SelectSelector(
-                        selector.SelectSelectorConfig(
-                            options=EFFECT_OPTIONS,
-                            mode=selector.SelectSelectorMode.DROPDOWN,
-                        )
-                    ),
-                    vol.Required(
-                        "effect_speed", default=current["effect_speed"]
-                    ): selector.SelectSelector(
-                        selector.SelectSelectorConfig(
-                            options=SPEED_OPTIONS,
-                            mode=selector.SelectSelectorMode.DROPDOWN,
-                        )
-                    ),
-                    vol.Required(
-                        "brightness", default=current["brightness"]
-                    ): selector.NumberSelector(
-                        selector.NumberSelectorConfig(
-                            min=0,
-                            max=100,
-                            step=1,
-                            mode=selector.NumberSelectorMode.SLIDER,
-                        )
-                    ),
-                    vol.Required(
-                        "duration", default=current["duration"]
-                    ): selector.NumberSelector(
-                        selector.NumberSelectorConfig(
-                            min=0,
-                            max=86400,
-                            step=1,
-                            unit_of_measurement="seconds",
-                        )
-                    ),
-                    vol.Required(
-                        "priority", default=current["priority"]
-                    ): selector.NumberSelector(
-                        selector.NumberSelectorConfig(
-                            min=0,
-                            max=100,
-                            step=1,
-                            mode=selector.NumberSelectorMode.SLIDER,
-                        )
-                    ),
-                }
+            data_schema=_notification_schema(
+                self.options["notifications"][slug]
             ),
         )
 
@@ -353,21 +312,24 @@ class NotifyLightsOptionsFlow(OptionsFlowWithConfigEntry):
                 data={"notifications": notifications}
             )
 
-        slug_options = [
-            selector.SelectOptionDict(value=slug, label=cfg["display_name"])
-            for slug, cfg in notifications.items()
-        ]
-
         return self.async_show_form(
             step_id="delete",
             data_schema=vol.Schema(
                 {
                     vol.Required("slug"): selector.SelectSelector(
                         selector.SelectSelectorConfig(
-                            options=slug_options,
+                            options=_slug_options(notifications),
                             mode=selector.SelectSelectorMode.DROPDOWN,
                         )
                     ),
                 }
             ),
         )
+
+
+def _slug_options(notifications: dict[str, Any]) -> list:
+    """Dropdown options listing notifications by their display name."""
+    return [
+        selector.SelectOptionDict(value=slug, label=cfg["display_name"])
+        for slug, cfg in notifications.items()
+    ]

@@ -7,6 +7,13 @@ from .const import Effect, Speed, NAMED_COLORS
 
 @dataclass(frozen=True)
 class Notification:
+    """The presentation of a notification: what it looks like and what it means.
+
+    Deliberately says nothing about *where* it appears. Targets are resolved
+    per config entry at setup time, because resolving areas and light groups
+    needs `hass` and can change without the notification changing.
+    """
+
     name: str
     display_name: str
     color: int | str
@@ -15,6 +22,10 @@ class Notification:
     effect_speed: Speed
     duration: int
     priority: int
+    # Free text explaining what this notification means. Surfaced as an entity
+    # attribute so the catalog is self-documenting -- display_name doubles as
+    # the UI label and cannot carry a sentence.
+    description: str = ""
 
     def __post_init__(self) -> None:
         color = self.color

@@ -33,7 +33,9 @@ async def async_setup_entry(
     )
 
     entities = [
-        NotificationButton(coordinator, notif, targets, entry, hass)
+        NotificationButton(
+            coordinator, notif, targets.get(notif.name, []), entry, hass
+        )
         for notif in momentary
     ]
     async_add_entities(entities)
@@ -63,6 +65,16 @@ class NotificationButton(ButtonEntity):
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
         )
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Expose what this notification means and where it will show."""
+        return {
+            "description": self._notification.description,
+            "priority": self._notification.priority,
+            "duration": self._notification.duration,
+            "targets": self._targets,
+        }
 
     async def async_press(self, **kwargs) -> None:
         _LOGGER.info(

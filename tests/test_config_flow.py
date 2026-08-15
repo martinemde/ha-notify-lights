@@ -1,4 +1,4 @@
-"""Tests for the Notify Lights config flow (pool-based)."""
+"""Tests for the Notify Lights config flow (catalog-based)."""
 import pytest
 from unittest.mock import MagicMock
 from custom_components.notify_lights.config_flow import (
@@ -21,14 +21,12 @@ async def test_user_step_shows_form():
 async def test_user_step_creates_entry():
     flow = NotifyLightsConfigFlow()
     flow.hass = MagicMock()
-    targets = {"entity_id": ["light.living_room", "light.kitchen"]}
-    result = await flow.async_step_user(
-        user_input={"name": "Floor 1 Switches", "targets": targets}
-    )
+    result = await flow.async_step_user(user_input={"name": "Floor 1 Switches"})
     assert result["type"] == "create_entry"
     assert result["title"] == "Floor 1 Switches"
     assert result["data"]["name"] == "Floor 1 Switches"
-    assert result["data"]["targets"] == targets
+    # Targets belong to notifications now, not to the catalog.
+    assert "targets" not in result["data"]
     assert result["options"] == {"notifications": {}}
 
 
@@ -36,10 +34,7 @@ async def test_user_step_creates_entry():
 async def test_user_step_default_name():
     flow = NotifyLightsConfigFlow()
     flow.hass = MagicMock()
-    targets = {"entity_id": ["switch.hallway"]}
-    result = await flow.async_step_user(
-        user_input={"name": "Home Notify Lights", "targets": targets}
-    )
+    result = await flow.async_step_user(user_input={"name": "Home Notify Lights"})
     assert result["type"] == "create_entry"
     assert result["title"] == "Home Notify Lights"
 
@@ -48,8 +43,7 @@ async def test_user_step_default_name():
 async def test_options_init_shows_menu():
     entry = MagicMock()
     entry.data = {
-        "name": "Test Pool",
-        "targets": {"entity_id": ["light.x"]},
+        "name": "Test Catalog",
     }
     entry.options = {
         "notifications": {
@@ -63,15 +57,14 @@ async def test_options_init_shows_menu():
     assert "add" in result["menu_options"]
     assert "modify" in result["menu_options"]
     assert "delete" in result["menu_options"]
-    assert "targets" in result["menu_options"]
+    assert "targets" not in result["menu_options"]
 
 
 @pytest.mark.asyncio
 async def test_options_init_redirects_to_add_when_empty():
     entry = MagicMock()
     entry.data = {
-        "name": "Test Pool",
-        "targets": {"entity_id": ["light.x"]},
+        "name": "Test Catalog",
     }
     entry.options = {"notifications": {}}
     flow = NotifyLightsOptionsFlow(entry)

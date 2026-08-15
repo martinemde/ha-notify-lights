@@ -32,7 +32,7 @@ async def async_setup_entry(
     )
 
     entities = [
-        NotificationSwitch(coordinator, notif, targets, entry)
+        NotificationSwitch(coordinator, notif, targets.get(notif.name, []), entry)
         for notif in stateful
     ]
     async_add_entities(entities)
@@ -64,6 +64,15 @@ class NotificationSwitch(SwitchEntity):
     @property
     def is_on(self) -> bool:
         return self._is_on
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Expose what this notification means and where it will show."""
+        return {
+            "description": self._notification.description,
+            "priority": self._notification.priority,
+            "targets": self._targets,
+        }
 
     async def async_turn_on(self, **kwargs) -> None:
         _LOGGER.info("Switch %s turned ON", self._notification.name)
