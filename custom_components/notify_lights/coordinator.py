@@ -40,6 +40,44 @@ class NotifyLightsCoordinator:
         self._stacks: dict[str, list[StackEntry]] = {}
         self._warned_targets: set[str] = set()
 
+    def supported_targets(self, targets: list[str]) -> list[str]:
+        """Keep one concrete entity for each adapter-supported device.
+
+        Area and device selectors naturally include ordinary lights alongside
+        notification-capable switches. Filtering here lets selectors stay
+        semantic (for example, ``area: kitchen``) while the adapter registry
+        decides which physical devices can render a notification.
+        """
+        chosen: dict[str, str] = {}
+        for entity_id in targets:
+            entity_entry = self._entity_registry.async_get(entity_id)
+            if entity_entry is None or entity_entry.device_id is None:
+                _LOGGER.debug("Ignoring target without a device: %s", entity_id)
+                continue
+
+            device_entry = self._device_registry.async_get(entity_entry.device_id)
+            if device_entry is None:
+                _LOGGER.debug("Ignoring target with missing device: %s", entity_id)
+                continue
+
+            adapter = self._adapter_registry.get_adapter(
+                device_entry.manufacturer or "", device_entry.model or ""
+            )
+            if adapter is None:
+                _LOGGER.debug(
+                    "Ignoring target without a notification adapter: %s", entity_id
+                )
+                continue
+
+            existing = chosen.get(entity_entry.device_id)
+            if existing is None or (
+                entity_id.startswith("light.")
+                and not existing.startswith("light.")
+            ):
+                chosen[entity_entry.device_id] = entity_id
+
+        return sorted(chosen.values())
+
     async def async_activate(
         self, notification: Notification, targets: list[str], pool_entry_id: str
     ) -> None:
@@ -51,6 +89,15 @@ class NotifyLightsCoordinator:
         )
         for target in targets:
             stack = self._stacks.setdefault(target, [])
+            # Services and startup restoration may activate an already-active
+            # switch. Replace its old entry instead of growing duplicates.
+            stack[:] = [
+                (n, pid, timestamp)
+                for n, pid, timestamp in stack
+                if not (
+                    n.name == notification.name and pid == pool_entry_id
+                )
+            ]
             stack.append((notification, pool_entry_id, activated_at))
             await self._render_target(target)
 
@@ -68,6 +115,23 @@ class NotifyLightsCoordinator:
                 (n, pid, t) for n, pid, t in stack
                 if not (n.name == notification.name and pid == pool_entry_id)
             ]
+            await self._render_target(target)
+
+    async def async_deactivate_entry(self, pool_entry_id: str) -> None:
+        """Remove every active notification owned by one config entry."""
+        changed_targets: list[str] = []
+        for target, stack in self._stacks.items():
+            kept = [entry for entry in stack if entry[1] != pool_entry_id]
+            if len(kept) != len(stack):
+                self._stacks[target] = kept
+                changed_targets.append(target)
+
+        _LOGGER.info(
+            "Deactivated entry %s on %d targets",
+            pool_entry_id,
+            len(changed_targets),
+        )
+        for target in changed_targets:
             await self._render_target(target)
 
     def _resolve_group_members(

@@ -61,3 +61,25 @@ def test_momentary_when_duration_positive():
     )
     assert n.is_momentary
     assert not n.is_stateful
+
+
+def test_source_bound_stateful_notification():
+    n = Notification(
+        name="front_door_unlocked", display_name="Front door unlocked",
+        color=0, brightness=100, effect=Effect.PULSE,
+        effect_speed=Speed.MEDIUM, duration=0, priority=90,
+        state_entity="lock.front_door_lock", active_state="unlocked",
+    )
+    assert n.is_stateful
+    assert n.is_source_bound
+    assert not n.is_manual_stateful
+
+
+def test_stateful_without_source_is_manual():
+    n = Notification(
+        name="manual", display_name="Manual", color=0, brightness=100,
+        effect=Effect.SOLID, effect_speed=Speed.MEDIUM,
+        duration=0, priority=50,
+    )
+    assert n.is_manual_stateful
+    assert not n.is_source_bound

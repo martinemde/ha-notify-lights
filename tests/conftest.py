@@ -13,7 +13,7 @@ class _ConfigFlow:
             cls.domain = domain
 
     def async_show_form(self, *, step_id, data_schema=None, errors=None):
-        return {"type": "form", "step_id": step_id, "data_schema": data_schema}
+        return {"type": "form", "step_id": step_id, "data_schema": data_schema, "errors": errors or {}}
 
     def async_create_entry(self, *, title, data, options=None):
         return {"type": "create_entry", "title": title, "data": data, "options": options or {}}
@@ -34,7 +34,12 @@ class _OptionsFlowWithConfigEntry:
         self.hass = getattr(config_entry, "hass", None)
 
     def async_show_form(self, *, step_id, data_schema=None, errors=None, description_placeholders=None):
-        return {"type": "form", "step_id": step_id, "data_schema": data_schema}
+        return {
+            "type": "form",
+            "step_id": step_id,
+            "data_schema": data_schema,
+            "errors": errors or {},
+        }
 
     def async_create_entry(self, *, data, title=""):
         return {"type": "create_entry", "data": data}
@@ -61,6 +66,13 @@ for module in [
     sys.modules.setdefault(module, MagicMock())
 
 sys.modules["homeassistant.config_entries"] = _config_entries_stub
+
+# Core constants used by restorable stateful switches.
+_const_module = types.ModuleType("homeassistant.const")
+_const_module.STATE_ON = "on"
+_const_module.STATE_UNKNOWN = "unknown"
+_const_module.STATE_UNAVAILABLE = "unavailable"
+sys.modules["homeassistant.const"] = _const_module
 
 # Stub voluptuous (used by config_flow for form schemas)
 if "voluptuous" not in sys.modules:
@@ -94,6 +106,45 @@ sys.modules.setdefault(
 )
 sys.modules["homeassistant.components.switch"] = _switch_module
 
+# Binary sensor entity stub
+_binary_sensor_module = types.ModuleType("homeassistant.components.binary_sensor")
+
+
+class _BinarySensorEntity:
+    _attr_unique_id = None
+    _attr_name = None
+    _attr_is_on = None
+    _attr_available = True
+
+    @property
+    def unique_id(self):
+        return self._attr_unique_id
+
+    @property
+    def name(self):
+        return self._attr_name
+
+    @property
+    def is_on(self):
+        return self._attr_is_on
+
+    @property
+    def available(self):
+        return self._attr_available
+
+    async def async_added_to_hass(self):
+        pass
+
+    def async_on_remove(self, callback):
+        self._remove_callback = callback
+
+    def async_write_ha_state(self):
+        pass
+
+
+_binary_sensor_module.BinarySensorEntity = _BinarySensorEntity
+sys.modules["homeassistant.components.binary_sensor"] = _binary_sensor_module
+
 # Button entity stub
 _button_module = types.ModuleType("homeassistant.components.button")
 
@@ -124,4 +175,23 @@ def _async_call_later(hass, delay, callback):
 
 
 _event_module.async_call_later = _async_call_later
+
+
+def _async_track_state_change_event(hass, entity_ids, callback):
+    return MagicMock()
+
+
+_event_module.async_track_state_change_event = _async_track_state_change_event
 sys.modules["homeassistant.helpers.event"] = _event_module
+
+# Restore-state mixin stub
+_restore_state_module = types.ModuleType("homeassistant.helpers.restore_state")
+
+
+class _RestoreEntity:
+    async def async_get_last_state(self):
+        return None
+
+
+_restore_state_module.RestoreEntity = _RestoreEntity
+sys.modules["homeassistant.helpers.restore_state"] = _restore_state_module

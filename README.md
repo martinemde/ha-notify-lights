@@ -14,7 +14,8 @@ complete, self-describing thing:
 | `targets` | Where it shows: any mix of entities, devices and areas |
 | `exclude` | Subtracted from `targets` |
 | `color`, `effect`, `effect_speed`, `brightness` | What it looks like |
-| `duration` | `0` = stateful (switch); `> 0` = momentary (button, auto-clears) |
+| `duration` | `0` = stateful; `> 0` = momentary button that auto-clears |
+| `state_entity`, `active_state` | Optional direct source for stateful notifications |
 | `priority` | `0`–`100`; arbitrates when several are active on one light |
 
 Appearance and priority live here rather than at the call site, so callers say
@@ -27,7 +28,7 @@ outranks a charge-complete notification by looking at either automation.
 Nothing to configure at the call site — a notification is just an entity:
 
 ```yaml
-# stateful (duration: 0) — held until you turn it off
+# manually stateful (duration: 0, no source) — held until turned off
 - action: switch.turn_on
   target:
     entity_id: switch.notify_fridge_ajar_kitchen
@@ -38,21 +39,37 @@ Nothing to configure at the call site — a notification is just an entity:
     entity_id: button.notify_hvac_cooling_bedrooms
 ```
 
+A stateful notification with a source entity needs no calling automation. It
+is exposed as a read-only binary sensor, subscribes to the source, and evaluates
+it immediately at setup:
+
+```
+state_entity: lock.front_door_lock
+active_state: unlocked
+```
+
+This is preferable when HA already has an entity representing the fact. It is
+restart-safe and avoids duplicating `on`/`off` synchronization in an automation.
+Leave the source empty only when the notification must be controlled manually;
+that form remains a switch. Impulses remain buttons.
+
 ### Why targets live on the notification
 
-A stateful notification is a `switch` entity, and a switch cannot take
-call-time parameters — so its definition is the only place its targets can
-live. Before v2 the config entry was a *pool* of lights holding several
-notifications, which forced the same notification to be redefined once per
-pool. Those copies drifted: `cooling` existed twice with different durations,
-and Home Assistant disambiguated the duplicate names into `notify_cooling` and
-`notify_cooling_2`, pushing the ambiguity back onto callers.
+A notification entity cannot take call-time target parameters, so its
+definition is the only place its targets can live. Before v2 the config entry
+was a *pool* of lights holding several notifications, which forced the same
+notification to be redefined once per pool. Those copies drifted: `cooling`
+existed twice with different durations, and Home Assistant disambiguated the
+duplicate names into `notify_cooling` and `notify_cooling_2`, pushing the
+ambiguity back onto callers.
 
 ### Targeting
 
 Prefer areas or light groups over individual switches. Group entities are
-expanded to their members (recursively, up to 3 levels), so targeting one area
-light group keeps working as switches are added to that area.
+expanded to their members (recursively, up to 3 levels) before activation, so
+notifications reaching one physical switch through different selectors share
+the same priority stack. Targeting one area light group keeps working as
+switches are added to that area and the integration is reloaded.
 
 `exclude` exists for the case enumeration handles badly — "the whole house
 except the kids' rooms":
@@ -80,6 +97,10 @@ only unique within an entry, so merging could collide. If you were running one
 pool per area, you will end up with one catalog per area, each notification now
 carrying its own targets. Consolidating into a single catalog is a manual step:
 recreate the notifications in one entry and delete the others.
+
+Manual stateful switches restore their active state after an integration reload
+or Home Assistant restart. Source-bound binary sensors re-evaluate their source
+at setup. Repeated activation is idempotent in either case.
 
 ## References
 

@@ -22,7 +22,7 @@
       },
       "add": {
         "title": "Add Notification",
-        "description": "Define a new LED notification. Duration 0 = stateful (a switch you hold on); duration > 0 = momentary (a button that clears itself). Target areas or light groups rather than individual switches where you can, so the notification keeps working as switches are added.",
+        "description": "Define a new LED notification. Duration 0 with a state source follows that entity automatically; duration 0 without one creates a manual switch. Duration > 0 creates a momentary button. Prefer target areas or light groups so the notification keeps working as switches are added.",
         "data": {
           "name": "Name",
           "description": "What this means",
@@ -33,6 +33,8 @@
           "effect_speed": "Speed",
           "brightness": "Brightness",
           "duration": "Duration (seconds, 0 = stays on)",
+          "state_entity": "State source (optional; requires duration 0)",
+          "active_state": "Source state that activates it",
           "priority": "Priority"
         }
       },
@@ -55,6 +57,8 @@
           "effect_speed": "Speed",
           "brightness": "Brightness",
           "duration": "Duration (seconds, 0 = stays on)",
+          "state_entity": "State source (optional; requires duration 0)",
+          "active_state": "Source state that activates it",
           "priority": "Priority"
         }
       },
@@ -66,7 +70,8 @@
       }
     },
     "error": {
-      "name_exists": "A notification with this name already exists."
+      "name_exists": "A notification with this name already exists.",
+      "state_source_requires_zero_duration": "A notification with a state source must have duration 0."
     }
   }
 }

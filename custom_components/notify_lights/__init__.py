@@ -19,7 +19,7 @@ from .notification import Notification
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["switch", "button"]
+PLATFORMS = ["switch", "button", "binary_sensor"]
 
 
 def _get_or_create_coordinator(hass: HomeAssistant) -> NotifyLightsCoordinator:
@@ -41,30 +41,99 @@ def _get_or_create_coordinator(hass: HomeAssistant) -> NotifyLightsCoordinator:
 
 
 SUPPORTED_DOMAINS = {"light", "switch"}
+MAX_GROUP_DEPTH = 3
+
+
+def _expand_group_members(
+    hass: HomeAssistant,
+    entity_id: str,
+    *,
+    _depth: int = 0,
+    _seen: set[str] | None = None,
+) -> set[str]:
+    """Expand a group entity recursively into concrete target entities.
+
+    Target selectors are normalized before notifications enter the
+    coordinator. That gives every physical entity one shared stack even when
+    different notifications reach it through different groups, and makes
+    exclusions work across selector types.
+    """
+    seen = set() if _seen is None else _seen
+    if entity_id in seen:
+        _LOGGER.warning("Target group cycle detected at %s", entity_id)
+        return set()
+    if _depth > MAX_GROUP_DEPTH:
+        _LOGGER.warning("Target group nesting is deeper than %d at %s", MAX_GROUP_DEPTH, entity_id)
+        return {entity_id}
+
+    state = hass.states.get(entity_id)
+    members = state.attributes.get("entity_id") if state is not None else None
+    if not members:
+        return {entity_id}
+
+    seen.add(entity_id)
+    result: set[str] = set()
+    for member_id in members:
+        result.update(
+            _expand_group_members(
+                hass,
+                member_id,
+                _depth=_depth + 1,
+                _seen=seen,
+            )
+        )
+    seen.remove(entity_id)
+    return result
 
 
 def resolve_targets(hass: HomeAssistant, targets: dict | list) -> list[str]:
-    """Resolve a TargetSelector dict to a flat list of entity IDs."""
+    """Resolve a TargetSelector to concrete light/switch entity IDs."""
     if isinstance(targets, list):
-        return targets
+        selected = set(targets)
+    else:
+        selected: set[str] = set()
+        ent_reg = er.async_get(hass)
+        dev_reg = dr.async_get(hass)
 
-    entity_ids: set[str] = set()
-    ent_reg = er.async_get(hass)
+        def add_device_entities(device_id: str) -> None:
+            """Add enabled, user-facing light/switch entities for a device."""
+            for entry in er.async_entries_for_device(ent_reg, device_id):
+                if (
+                    entry.domain in SUPPORTED_DOMAINS
+                    and entry.disabled_by is None
+                    and entry.entity_category is None
+                ):
+                    selected.add(entry.entity_id)
 
-    for entity_id in targets.get("entity_id", []):
-        entity_ids.add(entity_id)
+        for entity_id in targets.get("entity_id", []):
+            selected.add(entity_id)
 
-    for device_id in targets.get("device_id", []):
-        for entry in er.async_entries_for_device(ent_reg, device_id):
-            if entry.domain in SUPPORTED_DOMAINS:
-                entity_ids.add(entry.entity_id)
+        for device_id in targets.get("device_id", []):
+            add_device_entities(device_id)
 
-    for area_id in targets.get("area_id", []):
-        for entry in er.async_entries_for_area(ent_reg, area_id):
-            if entry.domain in SUPPORTED_DOMAINS:
-                entity_ids.add(entry.entity_id)
+        for area_id in targets.get("area_id", []):
+            # An entity may override its device's area. Include those direct
+            # assignments, then include entities whose device inherits the
+            # area. Home Assistant stores the common case only on the device.
+            for entry in er.async_entries_for_area(ent_reg, area_id):
+                if (
+                    entry.domain in SUPPORTED_DOMAINS
+                    and entry.disabled_by is None
+                    and entry.entity_category is None
+                ):
+                    selected.add(entry.entity_id)
+            for device in dr.async_entries_for_area(dev_reg, area_id):
+                add_device_entities(device.id)
 
-    return sorted(entity_ids)
+    expanded: set[str] = set()
+    for entity_id in selected:
+        expanded.update(_expand_group_members(hass, entity_id))
+
+    return sorted(
+        entity_id
+        for entity_id in expanded
+        if entity_id.split(".", 1)[0] in SUPPORTED_DOMAINS
+    )
 
 
 def notifications_from_options(options: dict) -> dict[str, Notification]:
@@ -84,6 +153,8 @@ def notifications_from_options(options: dict) -> dict[str, Notification]:
             duration=int(config["duration"]),
             priority=int(config["priority"]),
             description=config.get("description", ""),
+            state_entity=config.get("state_entity") or None,
+            active_state=config.get("active_state", "on"),
         )
     _LOGGER.info("Loaded %d notifications from options", len(result))
     return result
@@ -167,7 +238,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     coordinator = _get_or_create_coordinator(hass)
     notifications = notifications_from_options(entry.options)
-    targets = targets_from_options(hass, entry.options)
+    targets = {
+        slug: coordinator.supported_targets(resolved)
+        for slug, resolved in targets_from_options(hass, entry.options).items()
+    }
 
     # One device per config entry; every notification entity hangs off it.
     device_registry = dr.async_get(hass)
@@ -199,5 +273,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.info("Unloading pool %s", entry.entry_id)
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
+        coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+        await coordinator.async_deactivate_entry(entry.entry_id)
         hass.data[DOMAIN].pop(entry.entry_id, None)
     return unload_ok

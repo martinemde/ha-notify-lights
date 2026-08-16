@@ -72,3 +72,27 @@ async def test_options_init_redirects_to_add_when_empty():
     result = await flow.async_step_init(user_input=None)
     assert result["type"] == "form"
     assert result["step_id"] == "add"
+
+
+@pytest.mark.asyncio
+async def test_state_source_rejects_nonzero_duration():
+    entry = MagicMock()
+    entry.options = {"notifications": {}}
+    flow = NotifyLightsOptionsFlow(entry)
+    flow.hass = MagicMock()
+    result = await flow.async_step_add({
+        "name": "Front door unlocked",
+        "description": "",
+        "targets": {"entity_id": ["light.entry"]},
+        "exclude": {},
+        "color": "red",
+        "effect": "pulse",
+        "effect_speed": "medium",
+        "brightness": 100,
+        "duration": 5,
+        "priority": 90,
+        "state_entity": "lock.front_door_lock",
+        "active_state": "unlocked",
+    })
+    assert result["type"] == "form"
+    assert result["errors"]["duration"] == "state_source_requires_zero_duration"

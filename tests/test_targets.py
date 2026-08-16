@@ -1,6 +1,6 @@
 """Tests for per-notification targets, exclusion, and the v1 -> v2 migration."""
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from custom_components.notify_lights import (
     async_migrate_entry,
@@ -12,7 +12,9 @@ from custom_components.notify_lights.config_flow import notification_config
 
 
 def _hass():
-    return MagicMock()
+    hass = MagicMock()
+    hass.states.get.return_value = None
+    return hass
 
 
 def _form(name="Fridge Ajar", **overrides):
@@ -44,6 +46,16 @@ def test_notification_config_stores_targets_and_description():
     assert cfg["description"].startswith("A fridge has not cycled off")
 
 
+def test_notification_config_stores_optional_state_binding():
+    cfg = notification_config("front_door_unlocked", _form(
+        name="Front door unlocked",
+        state_entity="lock.front_door_lock",
+        active_state="unlocked",
+    ))
+    assert cfg["state_entity"] == "lock.front_door_lock"
+    assert cfg["active_state"] == "unlocked"
+
+
 def test_notification_config_defaults_optional_fields():
     form = _form()
     del form["description"]
@@ -51,6 +63,8 @@ def test_notification_config_defaults_optional_fields():
     cfg = notification_config("fridge_ajar", form)
     assert cfg["description"] == ""
     assert cfg["exclude"] == {}
+    assert cfg["state_entity"] is None
+    assert cfg["active_state"] == "on"
 
 
 # --- target resolution -----------------------------------------------------
@@ -90,6 +104,85 @@ def test_missing_targets_yields_no_targets():
     assert resolve_notification_targets(_hass(), {}) == []
 
 
+def test_area_target_includes_entities_inheriting_device_area():
+    """Most HA entities inherit area from their device, not their own row."""
+    hass = _hass()
+    ent_reg = MagicMock()
+    dev_reg = MagicMock()
+
+    device = MagicMock()
+    device.id = "inovelli_kitchen"
+    light = MagicMock()
+    light.domain = "light"
+    light.entity_id = "light.kitchen_dimmer"
+    light.disabled_by = None
+    light.entity_category = None
+
+    with (
+        patch("custom_components.notify_lights.er.async_get", return_value=ent_reg),
+        patch("custom_components.notify_lights.dr.async_get", return_value=dev_reg),
+        patch(
+            "custom_components.notify_lights.er.async_entries_for_area",
+            return_value=[],
+        ),
+        patch(
+            "custom_components.notify_lights.dr.async_entries_for_area",
+            return_value=[device],
+        ),
+        patch(
+            "custom_components.notify_lights.er.async_entries_for_device",
+            return_value=[light],
+        ),
+    ):
+        assert resolve_notification_targets(
+            hass, {"targets": {"area_id": ["kitchen"]}}
+        ) == ["light.kitchen_dimmer"]
+
+
+def test_area_target_skips_disabled_and_config_entities():
+    hass = _hass()
+    ent_reg = MagicMock()
+    dev_reg = MagicMock()
+    device = MagicMock()
+    device.id = "device_1"
+
+    main = MagicMock()
+    main.domain = "light"
+    main.entity_id = "light.main"
+    main.disabled_by = None
+    main.entity_category = None
+    disabled = MagicMock()
+    disabled.domain = "switch"
+    disabled.entity_id = "switch.disabled"
+    disabled.disabled_by = "user"
+    disabled.entity_category = None
+    config = MagicMock()
+    config.domain = "switch"
+    config.entity_id = "switch.config"
+    config.disabled_by = None
+    config.entity_category = "config"
+
+    with (
+        patch("custom_components.notify_lights.er.async_get", return_value=ent_reg),
+        patch("custom_components.notify_lights.dr.async_get", return_value=dev_reg),
+        patch(
+            "custom_components.notify_lights.er.async_entries_for_area",
+            return_value=[],
+        ),
+        patch(
+            "custom_components.notify_lights.dr.async_entries_for_area",
+            return_value=[device],
+        ),
+        patch(
+            "custom_components.notify_lights.er.async_entries_for_device",
+            return_value=[main, disabled, config],
+        ),
+    ):
+        assert resolve_notification_targets(
+            hass, {"targets": {"area_id": ["kitchen"]}}
+        ) == ["light.main"]
+
+
 def test_targets_from_options_keys_by_slug():
     options = {
         "notifications": {
@@ -114,6 +207,68 @@ def test_notifications_can_target_different_lights():
     }
     resolved = targets_from_options(_hass(), options)
     assert resolved["hvac_cooling_bedrooms"] != resolved["hvac_cooling_living_area"]
+
+
+def test_overlapping_groups_normalize_to_shared_physical_entity(monkeypatch):
+    """Different selectors must converge on one coordinator stack key."""
+    hass = _hass()
+
+    def state(entity_id):
+        members = {
+            "light.bedrooms": ["light.shared", "light.bed"],
+            "light.downstairs": ["light.shared", "light.kitchen"],
+        }.get(entity_id)
+        if members is None:
+            return None
+        result = MagicMock()
+        result.attributes = {"entity_id": members}
+        return result
+
+    hass.states.get.side_effect = state
+    options = {"notifications": {
+        "bedrooms": {"targets": {"entity_id": ["light.bedrooms"]}},
+        "downstairs": {"targets": {"entity_id": ["light.downstairs"]}},
+    }}
+
+    resolved = targets_from_options(hass, options)
+    assert "light.shared" in resolved["bedrooms"]
+    assert "light.shared" in resolved["downstairs"]
+    assert "light.bedrooms" not in resolved["bedrooms"]
+    assert "light.downstairs" not in resolved["downstairs"]
+
+
+def test_group_target_can_exclude_concrete_member():
+    hass = _hass()
+    group = MagicMock()
+    group.attributes = {"entity_id": ["light.keep", "light.exclude"]}
+    hass.states.get.side_effect = lambda entity_id: (
+        group if entity_id == "light.all" else None
+    )
+    cfg = {
+        "targets": {"entity_id": ["light.all"]},
+        "exclude": {"entity_id": ["light.exclude"]},
+    }
+    assert resolve_notification_targets(hass, cfg) == ["light.keep"]
+
+
+def test_nested_groups_are_expanded_and_deduplicated():
+    hass = _hass()
+
+    def state(entity_id):
+        members = {
+            "light.house": ["light.floor", "light.shared"],
+            "light.floor": ["light.shared", "switch.dimmer"],
+        }.get(entity_id)
+        if members is None:
+            return None
+        result = MagicMock()
+        result.attributes = {"entity_id": members}
+        return result
+
+    hass.states.get.side_effect = state
+    assert resolve_notification_targets(
+        hass, {"targets": {"entity_id": ["light.house"]}}
+    ) == ["light.shared", "switch.dimmer"]
 
 
 # --- description passthrough -----------------------------------------------

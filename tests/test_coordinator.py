@@ -79,6 +79,22 @@ async def test_activate_passes_notification_in_active_set():
 
 
 @pytest.mark.asyncio
+async def test_repeated_activation_is_idempotent():
+    hass, entity_reg, device_reg = _mock_hass_with_device()
+    registry = AdapterRegistry()
+    mock_adapter = _make_adapter()
+    registry.register(mock_adapter)
+    coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
+    notif = _make_notif(name="persistent")
+
+    await coordinator.async_activate(notif, TARGETS, POOL_ID)
+    await coordinator.async_activate(notif, TARGETS, POOL_ID)
+
+    active_set = mock_adapter.render.call_args[0][1]
+    assert [entry[0].name for entry in active_set] == ["persistent"]
+
+
+@pytest.mark.asyncio
 async def test_deactivate_clears_when_empty():
     hass, entity_reg, device_reg = _mock_hass_with_device()
     registry = AdapterRegistry()
@@ -145,12 +161,58 @@ async def test_deactivate_scoped_to_pool():
 
 
 @pytest.mark.asyncio
+async def test_deactivate_entry_removes_all_its_notifications():
+    hass, entity_reg, device_reg = _mock_hass_with_device()
+    registry = AdapterRegistry()
+    mock_adapter = _make_adapter()
+    registry.register(mock_adapter)
+    coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
+    own_a = _make_notif(name="own_a")
+    own_b = _make_notif(name="own_b")
+    other = _make_notif(name="other")
+    await coordinator.async_activate(own_a, TARGETS, "catalog_a")
+    await coordinator.async_activate(own_b, TARGETS, "catalog_a")
+    await coordinator.async_activate(other, TARGETS, "catalog_b")
+
+    await coordinator.async_deactivate_entry("catalog_a")
+
+    active_set = mock_adapter.render.call_args[0][1]
+    assert [entry[0].name for entry in active_set] == ["other"]
+
+
+@pytest.mark.asyncio
 async def test_unmatched_device_logs_and_skips():
     hass, entity_reg, device_reg = _mock_hass_with_device(manufacturer="Unknown", model="XYZ")
     registry = AdapterRegistry()
     coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
     notif = _make_notif()
     await coordinator.async_activate(notif, TARGETS, POOL_ID)
+
+
+def test_supported_targets_filters_unsupported_and_deduplicates_devices():
+    hass = MagicMock()
+    entity_reg = MagicMock()
+    device_reg = MagicMock()
+
+    entries = {
+        "switch.same_device": MagicMock(device_id="supported"),
+        "light.same_device": MagicMock(device_id="supported"),
+        "light.unsupported": MagicMock(device_id="unsupported"),
+    }
+    devices = {
+        "supported": MagicMock(manufacturer="Inovelli", model="VZM31-SN"),
+        "unsupported": MagicMock(manufacturer="Other", model="Plain light"),
+    }
+    entity_reg.async_get.side_effect = entries.get
+    device_reg.async_get.side_effect = devices.get
+
+    registry = AdapterRegistry()
+    registry.register(_make_adapter())
+    coordinator = NotifyLightsCoordinator(
+        hass, registry, entity_reg, device_reg
+    )
+
+    assert coordinator.supported_targets(list(entries)) == ["light.same_device"]
 
 
 @pytest.mark.asyncio

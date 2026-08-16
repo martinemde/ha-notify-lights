@@ -47,6 +47,36 @@ async def test_turn_off_deactivates_notification():
     coordinator.async_deactivate.assert_called_once_with(notif, TARGETS, ENTRY_ID)
 
 
+@pytest.mark.asyncio
+async def test_restores_active_notification_after_restart():
+    coordinator = AsyncMock()
+    notif = _make_notif()
+    switch = NotificationSwitch(coordinator, notif, TARGETS, _make_entry())
+    previous = MagicMock()
+    previous.state = "on"
+    switch.async_get_last_state = AsyncMock(return_value=previous)
+
+    await switch.async_added_to_hass()
+
+    assert switch.is_on is True
+    coordinator.async_activate.assert_called_once_with(notif, TARGETS, ENTRY_ID)
+
+
+@pytest.mark.asyncio
+async def test_does_not_restore_inactive_notification():
+    coordinator = AsyncMock()
+    notif = _make_notif()
+    switch = NotificationSwitch(coordinator, notif, TARGETS, _make_entry())
+    previous = MagicMock()
+    previous.state = "off"
+    switch.async_get_last_state = AsyncMock(return_value=previous)
+
+    await switch.async_added_to_hass()
+
+    assert switch.is_on is False
+    coordinator.async_activate.assert_not_called()
+
+
 def test_unique_id_includes_entry_id():
     coordinator = AsyncMock()
     notif = _make_notif("heating_alert", "Heating Alert")

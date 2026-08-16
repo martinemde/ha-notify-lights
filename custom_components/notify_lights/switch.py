@@ -5,9 +5,11 @@ import logging
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import STATE_ON
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import DOMAIN
 from .notification import Notification
@@ -25,7 +27,7 @@ async def async_setup_entry(
     notifications = data["notifications"]
     targets = data["targets"]
 
-    stateful = [n for n in notifications.values() if n.is_stateful]
+    stateful = [n for n in notifications.values() if n.is_manual_stateful]
     _LOGGER.info(
         "Switch platform setup: %d stateful of %d total notifications",
         len(stateful), len(notifications),
@@ -38,7 +40,7 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class NotificationSwitch(SwitchEntity):
+class NotificationSwitch(SwitchEntity, RestoreEntity):
     _attr_has_entity_name = True
 
     def __init__(
@@ -73,6 +75,12 @@ class NotificationSwitch(SwitchEntity):
             "priority": self._notification.priority,
             "targets": self._targets,
         }
+
+    async def async_added_to_hass(self) -> None:
+        """Restore persistent notifications after a reload or restart."""
+        last_state = await self.async_get_last_state()
+        if last_state is not None and last_state.state == STATE_ON:
+            await self.async_turn_on()
 
     async def async_turn_on(self, **kwargs) -> None:
         _LOGGER.info("Switch %s turned ON", self._notification.name)

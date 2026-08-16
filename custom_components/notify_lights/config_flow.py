@@ -4,11 +4,10 @@ A config entry is a *catalog* of notifications. Each notification carries its
 own targets, so it is a complete, self-describing thing: name, meaning,
 appearance, priority, and where it shows.
 
-Targets live on the notification rather than on the entry because a stateful
-notification is a `switch` entity, and a switch cannot take call-time
-parameters -- so the definition is the only place its targets can live. The
-earlier "pool owns the targets" model forced the same notification to be
-redefined once per pool, and those copies drifted.
+Targets live on the notification rather than on the entry because notification
+entities cannot take call-time target parameters -- so the definition is the
+only place targets can live. The earlier "pool owns the targets" model forced
+the same notification to be redefined once per pool, and those copies drifted.
 """
 from __future__ import annotations
 
@@ -83,6 +82,8 @@ def notification_config(slug: str, user_input: dict[str, Any]) -> dict[str, Any]
         "brightness": int(user_input["brightness"]),
         "duration": int(user_input["duration"]),
         "priority": int(user_input["priority"]),
+        "state_entity": user_input.get("state_entity") or None,
+        "active_state": user_input.get("active_state", "on"),
     }
 
 
@@ -156,9 +157,9 @@ def _notification_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                     mode=selector.NumberSelectorMode.SLIDER,
                 )
             ),
-            # 0 makes the notification stateful (a switch, held until turned
-            # off); anything else makes it momentary (a button that clears
-            # itself after this many seconds).
+            # 0 makes the notification stateful: a source-bound binary sensor
+            # or, without a source, a manual switch. Anything else creates a
+            # momentary button that clears itself after this many seconds.
             vol.Required(
                 "duration", default=current.get("duration", 0)
             ): selector.NumberSelector(
@@ -169,6 +170,14 @@ def _notification_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                     unit_of_measurement="seconds",
                 )
             ),
+            # Optional direct state binding. With duration 0 this replaces the
+            # manual switch with a read-only notification binary sensor.
+            vol.Optional(
+                "state_entity", default=current.get("state_entity") or ""
+            ): selector.EntitySelector(),
+            vol.Required(
+                "active_state", default=current.get("active_state", "on")
+            ): selector.TextSelector(),
             vol.Required(
                 "priority", default=current.get("priority", DEFAULT_PRIORITY)
             ): selector.NumberSelector(
@@ -239,7 +248,9 @@ class NotifyLightsOptionsFlow(OptionsFlowWithConfigEntry):
             slug = _slugify(name)
             notifications = dict(self.options.get("notifications", {}))
 
-            if slug in notifications:
+            if user_input.get("state_entity") and int(user_input["duration"]) != 0:
+                errors["duration"] = "state_source_requires_zero_duration"
+            elif slug in notifications:
                 errors["name"] = "name_exists"
             else:
                 notifications[slug] = notification_config(slug, user_input)
@@ -281,22 +292,27 @@ class NotifyLightsOptionsFlow(OptionsFlowWithConfigEntry):
         self, user_input: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         slug = self._modify_slug
+        errors: dict[str, str] = {}
 
         if user_input is not None:
-            notifications = dict(self.options.get("notifications", {}))
-            # Keep the original slug so the entity_id survives a rename of the
-            # display name -- callers reference the entity, not the label.
-            notifications[slug] = notification_config(slug, user_input)
-            _LOGGER.info("Modified notification slug=%r", slug)
-            return self.async_create_entry(
-                data={"notifications": notifications}
-            )
+            if user_input.get("state_entity") and int(user_input["duration"]) != 0:
+                errors["duration"] = "state_source_requires_zero_duration"
+            else:
+                notifications = dict(self.options.get("notifications", {}))
+                # Keep the original slug so the entity_id survives a rename of
+                # the display name -- callers reference the entity, not label.
+                notifications[slug] = notification_config(slug, user_input)
+                _LOGGER.info("Modified notification slug=%r", slug)
+                return self.async_create_entry(
+                    data={"notifications": notifications}
+                )
 
         return self.async_show_form(
             step_id="modify_form",
             data_schema=_notification_schema(
                 self.options["notifications"][slug]
             ),
+            errors=errors,
         )
 
     async def async_step_delete(
