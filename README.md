@@ -23,6 +23,33 @@ Appearance and priority live here rather than at the call site, so callers say
 priority arbitration possible at all: you cannot decide whether a fridge alert
 outranks a charge-complete notification by looking at either automation.
 
+### Layering on Inovelli Blue switches
+
+The Zigbee2MQTT adapter keeps the two highest-priority active notifications
+visible. With one notification, the switch uses its native full-bar effect.
+With two or more, LED 1 (the bottom pixel) becomes a solid indicator in the
+second-priority notification's color, while LEDs 2–7 render the top-priority
+notification. Notifications below those two stay in the active stack and move
+into view as higher-priority notifications clear.
+
+Layered bars use Zigbee2MQTT's `individual_led_effect` command. That command
+has a smaller animation set than the full-bar command: blink falls back to slow
+or fast (medium uses fast), and chase/falling/rising use the one speed exposed
+by Zigbee2MQTT. The bottom priority indicator is intentionally always solid.
+
+To preview a stack in a true-color terminal without a switch:
+
+```console
+python scripts/preview_inovelli_bar.py \
+  urgent:red:90:pulse:fast \
+  hvac:blue:30:solid \
+  --commands
+```
+
+Each argument is
+`NAME:COLOR:PRIORITY[:EFFECT[:SPEED[:BRIGHTNESS]]]`. Add `--no-color` for a
+plain-text preview. `--commands` also prints the exact Zigbee2MQTT payloads.
+
 ### Calling it
 
 Nothing to configure at the call site — a notification is just an entity:

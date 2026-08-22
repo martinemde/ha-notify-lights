@@ -2,14 +2,23 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers import (
-    area_registry as ar,
-    device_registry as dr,
-    entity_registry as er,
-)
+if TYPE_CHECKING:
+    from homeassistant.config_entries import ConfigEntry
+    from homeassistant.core import HomeAssistant
+
+# Home Assistant is present when the integration is loaded. Keeping these
+# optional at import time also lets pure model tooling (such as the LED bar
+# preview script) import the package in an ordinary development environment.
+try:
+    from homeassistant.helpers import (
+        device_registry as dr,
+        entity_registry as er,
+    )
+except ModuleNotFoundError:  # pragma: no cover - exercised by the preview CLI
+    dr = None
+    er = None
 
 from .adapter import AdapterRegistry
 from .adapters.inovelli_blue_z2m import InovelliBlueZ2MAdapter

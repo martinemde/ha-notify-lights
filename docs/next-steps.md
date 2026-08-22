@@ -1,6 +1,6 @@
 # Notify Lights — Next Steps
 
-## Current State (v0.2.0)
+## Current State (v0.4.0)
 
 Working integration with:
 - Options flow to add/remove notifications via Configure button
@@ -8,7 +8,8 @@ Working integration with:
 - Button entities for momentary notifications (duration>0)
 - Inovelli Blue Z2M adapter (MQTT publish to Zigbee2MQTT)
 - Priority-based active set ordering
-- 44 unit/integration tests passing
+- Two-layer Inovelli Blue rendering via `individual_led_effect`
+- Unit/integration test coverage for the switch model and MQTT command stacks
 
 ## What to Test on Real Hardware
 
@@ -30,8 +31,8 @@ Working integration with:
 
 4. **Test priority stacking**
    - Create two notifications targeting the same switch with different priorities
-   - Turn on low priority, then high priority → high should render
-   - Turn off high → low should render
+   - Turn on low priority, then high priority → low should occupy LED 1 and high LEDs 2–7
+   - Turn off high → low should expand back to the native full-bar effect
    - Turn off low → LEDs should clear
 
 5. **Test momentary (button) entities**
@@ -52,8 +53,6 @@ Working integration with:
 ### Feature gaps from the spec
 
 - **Area and group target resolution**: Spec says targets can be `area_id:*` refs and `group.*` entities, resolved at activation time. Currently only entity IDs work.
-
-- **Multi-LED stacking (Blue Series)**: Blue has 7 individually addressable LEDs via `individual_led_effect`. Currently only renders the top-priority notification on the full bar. Stacking would assign each active notification to its own LED (7=top priority, 6=second, etc.).
 
 - **Edit existing notifications**: Options flow only has add/remove. Need an edit flow to modify notifications without deleting and recreating.
 
