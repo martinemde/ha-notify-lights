@@ -6,8 +6,11 @@ import pytest
 
 from custom_components.notify_lights.adapters.inovelli_blue_z2m import (
     InovelliBlueZ2MAdapter,
+    InovelliBlueZ2MState,
+    build_z2m_render_payloads,
     effect_to_z2m_string,
     hue_to_z2m_color,
+    individual_effect_to_z2m_string,
     seconds_to_z2m_duration,
 )
 from custom_components.notify_lights.const import Effect, Speed
@@ -43,6 +46,14 @@ def test_effect_to_z2m_string():
     assert effect_to_z2m_string(Effect.CHASE, Speed.FAST) == "fast_chase"
     assert effect_to_z2m_string(Effect.FALLING, Speed.FAST) == "fast_falling"
     assert effect_to_z2m_string(Effect.AURORA, Speed.FAST) == "aurora"
+
+
+def test_individual_effect_to_z2m_string_uses_supported_effects():
+    assert individual_effect_to_z2m_string(Effect.BLINK, Speed.SLOW) == "slow_blink"
+    assert individual_effect_to_z2m_string(Effect.BLINK, Speed.MEDIUM) == "fast_blink"
+    assert individual_effect_to_z2m_string(Effect.FALLING, Speed.FAST) == "falling"
+    assert individual_effect_to_z2m_string(Effect.RISING, Speed.SLOW) == "rising"
+    assert individual_effect_to_z2m_string(Effect.CHASE, Speed.FAST) == "chase"
 
 
 # --- Adapter render/clear tests ---
@@ -92,19 +103,92 @@ async def test_render_single_notification_uses_full_bar():
 
 
 @pytest.mark.asyncio
-async def test_render_multiple_uses_top_priority_only():
+async def test_render_multiple_layers_second_priority_at_bottom():
     hass = MagicMock()
     hass.services.async_call = AsyncMock()
     adapter = InovelliBlueZ2MAdapter(hass)
     active = [
-        (_make_notif("high", priority=90), 1.0),
-        (_make_notif("low", priority=10, color=120), 2.0),
+        (_make_notif("high", priority=90, color=0, effect=Effect.PULSE), 1.0),
+        (_make_notif("low", priority=10, color=120, effect=Effect.BLINK), 2.0),
     ]
 
     await adapter.render("inovelli_dimmer", active)
 
-    # v1: only top-priority notification rendered on full bar
-    hass.services.async_call.assert_called_once()
+    # Clear any previous full-bar effect, then program LEDs bottom-to-top.
+    assert hass.services.async_call.call_count == 8
+    payloads = [
+        json.loads(call.args[2]["payload"])
+        for call in hass.services.async_call.call_args_list
+    ]
+    assert payloads[0]["led_effect"]["effect"] == "clear_effect"
+
+    bottom = payloads[1]["individual_led_effect"]
+    assert bottom == {
+        "led": "1",
+        "effect": "solid",
+        "color": 85,
+        "level": 100,
+        "duration": 255,
+    }
+    for led, payload in enumerate(payloads[2:], start=2):
+        pixel = payload["individual_led_effect"]
+        assert pixel["led"] == str(led)
+        assert pixel["effect"] == "pulse"
+        assert pixel["color"] == 0
+
+
+def test_render_payloads_ignore_notifications_below_second_priority():
+    active = [
+        (_make_notif("high", priority=90, color=0), 1.0),
+        (_make_notif("middle", priority=50, color=120), 2.0),
+        (_make_notif("low", priority=10, color=240), 3.0),
+    ]
+
+    payloads = build_z2m_render_payloads(active)
+
+    colors = [
+        payload["individual_led_effect"]["color"] for payload in payloads[1:]
+    ]
+    assert colors == [85, 0, 0, 0, 0, 0, 0]
+
+
+def test_z2m_state_model_applies_layered_command_stack():
+    active = [
+        (_make_notif("high", color=240, effect=Effect.PULSE), 1.0),
+        (_make_notif("low", color=60, effect=Effect.BLINK), 2.0),
+    ]
+    model = InovelliBlueZ2MState()
+
+    model.apply_all(build_z2m_render_payloads(active))
+
+    assert model.pixels[0].color == 42
+    assert model.pixels[0].effect == "solid"
+    assert [pixel.color for pixel in model.pixels[1:]] == [170] * 6
+    assert [pixel.effect for pixel in model.pixels[1:]] == ["pulse"] * 6
+
+
+def test_z2m_state_model_full_bar_replaces_layered_state():
+    high = _make_notif("high", color=240, effect=Effect.PULSE)
+    low = _make_notif("low", color=60)
+    model = InovelliBlueZ2MState()
+    model.apply_all(build_z2m_render_payloads([(high, 1.0), (low, 2.0)]))
+
+    model.apply_all(build_z2m_render_payloads([(low, 2.0)]))
+
+    assert [pixel.color for pixel in model.pixels] == [42] * 7
+    assert [pixel.effect for pixel in model.pixels] == ["solid"] * 7
+
+
+def test_z2m_state_model_validates_led_number():
+    model = InovelliBlueZ2MState()
+
+    with pytest.raises(ValueError, match="LED must be 1-7"):
+        model.apply({
+            "individual_led_effect": {
+                "led": "8", "effect": "solid", "color": 0,
+                "level": 100, "duration": 255,
+            }
+        })
 
 
 @pytest.mark.asyncio
