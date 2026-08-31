@@ -1,4 +1,5 @@
 """Switch entity for stateful (duration=0) notifications."""
+
 from __future__ import annotations
 
 import logging
@@ -30,7 +31,8 @@ async def async_setup_entry(
     stateful = [n for n in notifications.values() if n.is_manual_stateful]
     _LOGGER.info(
         "Switch platform setup: %d stateful of %d total notifications",
-        len(stateful), len(notifications),
+        len(stateful),
+        len(notifications),
     )
 
     entities = [
@@ -55,9 +57,7 @@ class NotificationSwitch(SwitchEntity, RestoreEntity):
         self._targets = targets
         self._entry_id = entry.entry_id
         self._is_on = False
-        self._attr_unique_id = (
-            f"notify_lights_{entry.entry_id}_{notification.name}"
-        )
+        self._attr_unique_id = f"notify_lights_{entry.entry_id}_{notification.name}"
         self._attr_name = notification.display_name
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},

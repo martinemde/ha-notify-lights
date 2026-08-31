@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Create Notification Catalog",
-        "description": "A catalog holds your LED notifications. Each notification defines what it means, what it looks like, and which lights show it. Give the catalog a name; you'll add notifications next.",
+        "description": "A catalog holds reusable light groups and notification rules.",
         "data": {
           "name": "Catalog name"
         }
@@ -13,65 +13,118 @@
   "options": {
     "step": {
       "init": {
-        "description": "Add, modify or delete notifications in this catalog.",
+        "title": "Notify Lights",
+        "description": "Light groups answer **where** a notification appears. Notification rules answer **when** it appears and **what** it looks like.",
         "menu_options": {
-          "add": "Add notification",
-          "modify": "Modify notification",
-          "delete": "Delete notification"
+          "add_group": "Add light group",
+          "modify_group": "Edit light group",
+          "delete_group": "Delete light group",
+          "add_notification": "Add notification rule",
+          "modify_notification": "Edit notification rule",
+          "delete_notification": "Delete notification rule"
         }
       },
-      "add": {
-        "title": "Add Notification",
-        "description": "Define a new LED notification. Duration 0 with a state source follows that entity automatically; duration 0 without one creates a manual switch. Duration > 0 creates a momentary button. Prefer target areas or light groups so the notification keeps working as switches are added.",
+      "add_group": {
+        "title": "Add Light Group",
+        "description": "Create a reusable destination such as “Common alerts,” “Near garage,” or “Outside office.” Areas and Home Assistant light groups are supported. Use Except for patterns such as the whole house except kids’ rooms. If the same switches are also in a Zigbee2MQTT group, enter its friendly name to send one reliable groupcast instead of many device commands.",
         "data": {
-          "name": "Name",
-          "description": "What this means",
-          "targets": "Show on",
+          "name": "Group name",
+          "description": "What this group covers",
+          "targets": "Lights, devices, or areas",
           "exclude": "Except",
+          "zigbee2mqtt_group": "Zigbee2MQTT group (optional)"
+        }
+      },
+      "modify_group": {
+        "title": "Edit Light Group",
+        "data": {
+          "slug": "Light group"
+        }
+      },
+      "modify_group_form": {
+        "title": "Edit Light Group",
+        "description": "Changing this group updates every notification rule that uses it. A Zigbee2MQTT group must contain exactly the same switches selected here.",
+        "data": {
+          "name": "Group name",
+          "description": "What this group covers",
+          "targets": "Lights, devices, or areas",
+          "exclude": "Except",
+          "zigbee2mqtt_group": "Zigbee2MQTT group (optional)"
+        }
+      },
+      "delete_group": {
+        "title": "Delete Light Group",
+        "data": {
+          "slug": "Light group"
+        }
+      },
+      "add_notification": {
+        "title": "Add Notification Rule",
+        "description": "Choose a plain-language activation behavior. Automatic rules can follow a state for as long as it is true, or start a timed notification when that state is entered.",
+        "data": {
+          "name": "Notification name",
+          "description": "What this notification means",
+          "activation": "When to show it"
+        }
+      },
+      "modify_notification": {
+        "title": "Edit Notification Rule",
+        "data": {
+          "slug": "Notification rule"
+        }
+      },
+      "modify_notification_form": {
+        "title": "Edit Notification Rule",
+        "description": "Renaming changes the display name only; the entity ID remains stable.",
+        "data": {
+          "name": "Notification name",
+          "description": "What this notification means",
+          "activation": "When to show it"
+        }
+      },
+      "notification_source": {
+        "title": "Choose the State Source",
+        "description": "Select the Home Assistant entity that represents this condition. Next you'll choose its main state or a specific attribute, such as a climate entity's hvac_action.",
+        "data": {
+          "state_entity": "Source entity"
+        }
+      },
+      "notification_property": {
+        "title": "Choose What to Watch",
+        "description": "Watch the entity's main state, or choose one of its attributes. Current values are shown to make the choice understandable without looking in Developer Tools.",
+        "data": {
+          "source_property": "State or attribute"
+        }
+      },
+      "notification_details": {
+        "title": "Route and Style the Notification",
+        "description": "Choose reusable light groups, optional extra lights, and the LED appearance. Higher-priority notifications win when several are active on the same switch. Priority 30 or lower always has a one-pixel footprint in the stack, regardless of the selected coverage.",
+        "data": {
+          "groups": "Light groups",
+          "targets": "Additional lights, devices, or areas",
+          "exclude": "Except",
+          "active_state": "Source state",
+          "duration": "Show for (seconds)",
           "color": "Color",
           "effect": "Effect",
           "effect_speed": "Speed",
           "brightness": "Brightness",
-          "duration": "Duration (seconds, 0 = stays on)",
-          "state_entity": "State source (optional; requires duration 0)",
-          "active_state": "Source state that activates it",
-          "priority": "Priority"
+          "priority": "Priority",
+          "display_mode": "Light-bar coverage"
         }
       },
-      "modify": {
-        "title": "Modify Notification",
+      "delete_notification": {
+        "title": "Delete Notification Rule",
         "data": {
-          "slug": "Notification to modify"
-        }
-      },
-      "modify_form": {
-        "title": "Edit Notification",
-        "description": "Renaming changes the display name only; the entity ID stays the same so existing automations keep working.",
-        "data": {
-          "name": "Display name",
-          "description": "What this means",
-          "targets": "Show on",
-          "exclude": "Except",
-          "color": "Color",
-          "effect": "Effect",
-          "effect_speed": "Speed",
-          "brightness": "Brightness",
-          "duration": "Duration (seconds, 0 = stays on)",
-          "state_entity": "State source (optional; requires duration 0)",
-          "active_state": "Source state that activates it",
-          "priority": "Priority"
-        }
-      },
-      "delete": {
-        "title": "Delete Notification",
-        "data": {
-          "slug": "Notification to delete"
+          "slug": "Notification rule"
         }
       }
     },
     "error": {
-      "name_exists": "A notification with this name already exists.",
-      "state_source_requires_zero_duration": "A notification with a state source must have duration 0."
+      "name_exists": "A record with this name already exists.",
+      "invalid_name": "Enter a name containing at least one letter or number.",
+      "target_required": "Choose at least one light group or additional target.",
+      "group_in_use": "This light group is used by a notification rule. Edit that rule before deleting the group."
     }
   }
 }

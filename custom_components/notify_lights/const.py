@@ -19,6 +19,22 @@ class Speed(StrEnum):
     FAST = "fast"
 
 
+class Activation(StrEnum):
+    """How a notification rule becomes active."""
+
+    STATE_WHILE = "state_while"
+    STATE_ENTERED = "state_entered"
+    MANUAL_WHILE = "manual_while"
+    MANUAL_TIMED = "manual_timed"
+
+
+class DisplayMode(StrEnum):
+    """How much of a device's notification surface a rule should use."""
+
+    FULL = "full"
+    INDICATOR = "indicator"
+
+
 NAMED_COLORS: dict[str, int] = {
     "red": 0,
     "orange": 21,

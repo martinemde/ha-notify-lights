@@ -1,11 +1,16 @@
 """Tests for NotifyLightsCoordinator."""
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock
 
-from custom_components.notify_lights.coordinator import NotifyLightsCoordinator
+import pytest
+
 from custom_components.notify_lights.adapter import AdapterRegistry
-from custom_components.notify_lights.notification import Notification
 from custom_components.notify_lights.const import Effect, Speed
+from custom_components.notify_lights.coordinator import (
+    NotifyLightsCoordinator,
+    TransportGroup,
+)
+from custom_components.notify_lights.notification import Notification
 
 
 def _make_notif(name="test", priority=50, color=0, effect=Effect.SOLID):
@@ -47,6 +52,7 @@ def _make_adapter(manufacturer="Inovelli", model_patterns=None):
     mock_adapter = AsyncMock()
     mock_adapter.manufacturer = manufacturer
     mock_adapter.model_patterns = model_patterns or ["VZM31*"]
+    mock_adapter.target_for_device = lambda device: device.name
     return mock_adapter
 
 
@@ -182,7 +188,9 @@ async def test_deactivate_entry_removes_all_its_notifications():
 
 @pytest.mark.asyncio
 async def test_unmatched_device_logs_and_skips():
-    hass, entity_reg, device_reg = _mock_hass_with_device(manufacturer="Unknown", model="XYZ")
+    hass, entity_reg, device_reg = _mock_hass_with_device(
+        manufacturer="Unknown", model="XYZ"
+    )
     registry = AdapterRegistry()
     coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
     notif = _make_notif()
@@ -208,9 +216,7 @@ def test_supported_targets_filters_unsupported_and_deduplicates_devices():
 
     registry = AdapterRegistry()
     registry.register(_make_adapter())
-    coordinator = NotifyLightsCoordinator(
-        hass, registry, entity_reg, device_reg
-    )
+    coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
 
     assert coordinator.supported_targets(list(entries)) == ["light.same_device"]
 
@@ -223,7 +229,9 @@ async def test_missing_entity_entry_logs_and_skips():
     entity_registry.async_get.return_value = None
     device_registry = MagicMock()
     registry = AdapterRegistry()
-    coordinator = NotifyLightsCoordinator(hass, registry, entity_registry, device_registry)
+    coordinator = NotifyLightsCoordinator(
+        hass, registry, entity_registry, device_registry
+    )
     notif = _make_notif()
     await coordinator.async_activate(notif, TARGETS, POOL_ID)
     device_registry.async_get.assert_not_called()
@@ -240,7 +248,9 @@ async def test_missing_device_entry_skips():
     device_registry = MagicMock()
     device_registry.async_get.return_value = None
     registry = AdapterRegistry()
-    coordinator = NotifyLightsCoordinator(hass, registry, entity_registry, device_registry)
+    coordinator = NotifyLightsCoordinator(
+        hass, registry, entity_registry, device_registry
+    )
     notif = _make_notif()
     await coordinator.async_activate(notif, TARGETS, POOL_ID)
 
@@ -355,3 +365,60 @@ async def test_group_skips_unsupported_members():
     notif = _make_notif()
     await coordinator.async_activate(notif, ["light.all_lights"], POOL_ID)
     assert mock_adapter.render.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_transport_group_renders_identical_member_stacks_once():
+    members = ["light.device_1", "light.device_2"]
+    hass, entity_reg, device_reg = _mock_group_hass(member_ids=members)
+    registry = AdapterRegistry()
+    mock_adapter = _make_adapter()
+    registry.register(mock_adapter)
+    coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
+    coordinator.register_transport_groups(
+        POOL_ID,
+        [
+            TransportGroup(
+                name="Security",
+                target="notify/security",
+                members=frozenset(members),
+            )
+        ],
+    )
+
+    await coordinator.async_activate(_make_notif(), members, POOL_ID)
+
+    mock_adapter.render_group.assert_awaited_once()
+    assert mock_adapter.render_group.call_args.args[0] == "notify/security"
+    assert set(mock_adapter.render_group.call_args.args[2]) == {"device_0", "device_1"}
+    mock_adapter.render.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_transport_group_falls_back_when_member_stacks_diverge():
+    members = ["light.device_1", "light.device_2"]
+    hass, entity_reg, device_reg = _mock_group_hass(member_ids=members)
+    registry = AdapterRegistry()
+    mock_adapter = _make_adapter()
+    registry.register(mock_adapter)
+    coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
+    coordinator.register_transport_groups(
+        POOL_ID,
+        [
+            TransportGroup(
+                name="Security",
+                target="notify/security",
+                members=frozenset(members),
+            )
+        ],
+    )
+    baseline = _make_notif("baseline", priority=10)
+    exception = _make_notif("exception", priority=90)
+    await coordinator.async_activate(baseline, members, POOL_ID)
+    await coordinator.async_activate(exception, [members[0]], "other_pool")
+    mock_adapter.render.reset_mock()
+
+    await coordinator.async_deactivate(baseline, members, POOL_ID)
+
+    assert mock_adapter.render_group.await_count == 1
+    assert mock_adapter.render.await_count == 2

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .const import Effect, Speed, NAMED_COLORS
+from .const import NAMED_COLORS, DisplayMode, Effect, Speed
 
 
 @dataclass(frozen=True)
@@ -28,6 +28,8 @@ class Notification:
     description: str = ""
     state_entity: str | None = None
     active_state: str = "on"
+    state_attribute: str | None = None
+    display_mode: DisplayMode = DisplayMode.FULL
 
     def __post_init__(self) -> None:
         color = self.color
@@ -40,9 +42,7 @@ class Notification:
         if not 0 <= color <= 360:
             raise ValueError(f"Color hue must be 0-360, got {color}")
         if not 0 <= self.brightness <= 100:
-            raise ValueError(
-                f"Brightness must be 0-100, got {self.brightness}"
-            )
+            raise ValueError(f"Brightness must be 0-100, got {self.brightness}")
         if not 0 <= self.priority <= 100:
             raise ValueError(f"Priority must be 0-100, got {self.priority}")
 
@@ -53,8 +53,18 @@ class Notification:
 
     @property
     def is_source_bound(self) -> bool:
-        """True when a source entity controls this notification's state."""
-        return self.is_stateful and bool(self.state_entity)
+        """True when a source entity controls this notification."""
+        return bool(self.state_entity)
+
+    @property
+    def is_source_stateful(self) -> bool:
+        """True when active state should follow the source continuously."""
+        return self.is_source_bound and self.duration == 0
+
+    @property
+    def is_source_momentary(self) -> bool:
+        """True when entering the source state starts a timer."""
+        return self.is_source_bound and self.duration > 0
 
     @property
     def is_manual_stateful(self) -> bool:
@@ -65,3 +75,8 @@ class Notification:
     def is_momentary(self) -> bool:
         """True when the notification auto-clears after a fixed duration."""
         return self.duration > 0
+
+    @property
+    def is_manual_momentary(self) -> bool:
+        """True when a manual button starts a timed notification."""
+        return self.duration > 0 and not self.state_entity

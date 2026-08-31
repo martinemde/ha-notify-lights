@@ -1,4 +1,5 @@
 """Stub out Home Assistant modules so pure-Python unit tests run without HA."""
+
 import sys
 import types
 from unittest.mock import MagicMock
@@ -13,10 +14,20 @@ class _ConfigFlow:
             cls.domain = domain
 
     def async_show_form(self, *, step_id, data_schema=None, errors=None):
-        return {"type": "form", "step_id": step_id, "data_schema": data_schema, "errors": errors or {}}
+        return {
+            "type": "form",
+            "step_id": step_id,
+            "data_schema": data_schema,
+            "errors": errors or {},
+        }
 
     def async_create_entry(self, *, title, data, options=None):
-        return {"type": "create_entry", "title": title, "data": data, "options": options or {}}
+        return {
+            "type": "create_entry",
+            "title": title,
+            "data": data,
+            "options": options or {},
+        }
 
     async def async_set_unique_id(self, unique_id):
         self._unique_id = unique_id
@@ -25,15 +36,16 @@ class _ConfigFlow:
         pass
 
 
-class _OptionsFlowWithConfigEntry:
-    """Minimal stub for OptionsFlowWithConfigEntry."""
+class _OptionsFlow:
+    """Minimal stub for the current Home Assistant OptionsFlow API."""
 
-    def __init__(self, config_entry=None):
-        self.config_entry = config_entry
-        self.options = getattr(config_entry, "options", {}) if config_entry else {}
-        self.hass = getattr(config_entry, "hass", None)
+    def __init__(self):
+        self.config_entry = None
+        self.hass = None
 
-    def async_show_form(self, *, step_id, data_schema=None, errors=None, description_placeholders=None):
+    def async_show_form(
+        self, *, step_id, data_schema=None, errors=None, description_placeholders=None
+    ):
         return {
             "type": "form",
             "step_id": step_id,
@@ -51,7 +63,15 @@ class _OptionsFlowWithConfigEntry:
 _config_entries_stub = types.ModuleType("homeassistant.config_entries")
 _config_entries_stub.ConfigFlow = _ConfigFlow
 _config_entries_stub.ConfigEntry = MagicMock
-_config_entries_stub.OptionsFlowWithConfigEntry = _OptionsFlowWithConfigEntry
+_config_entries_stub.OptionsFlow = _OptionsFlow
+_config_entries_stub.OptionsFlowWithConfigEntry = _OptionsFlow
+
+_core_module = types.ModuleType("homeassistant.core")
+_core_module.callback = lambda func: func
+_core_module.Event = MagicMock
+_core_module.HomeAssistant = MagicMock
+_core_module.State = MagicMock
+sys.modules["homeassistant.core"] = _core_module
 
 # Stub homeassistant modules before any component imports
 for module in [

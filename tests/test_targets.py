@@ -1,8 +1,11 @@
-"""Tests for per-notification targets, exclusion, and the v1 -> v2 migration."""
-import pytest
+"""Tests for reusable targets, exclusions, and config-entry migrations."""
+
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from custom_components.notify_lights import (
+    _pending_native_group_entities,
     async_migrate_entry,
     notifications_from_options,
     resolve_notification_targets,
@@ -30,6 +33,8 @@ def _form(name="Fridge Ajar", **overrides):
         "brightness": 100,
         "duration": 0,
         "priority": 75,
+        "activation": "manual_while",
+        "display_mode": "full",
     }
     data.update(overrides)
     return data
@@ -47,11 +52,15 @@ def test_notification_config_stores_targets_and_description():
 
 
 def test_notification_config_stores_optional_state_binding():
-    cfg = notification_config("front_door_unlocked", _form(
-        name="Front door unlocked",
-        state_entity="lock.front_door_lock",
-        active_state="unlocked",
-    ))
+    cfg = notification_config(
+        "front_door_unlocked",
+        _form(
+            name="Front door unlocked",
+            state_entity="lock.front_door_lock",
+            active_state="unlocked",
+            activation="state_while",
+        ),
+    )
     assert cfg["state_entity"] == "lock.front_door_lock"
     assert cfg["active_state"] == "unlocked"
 
@@ -65,6 +74,8 @@ def test_notification_config_defaults_optional_fields():
     assert cfg["exclude"] == {}
     assert cfg["state_entity"] is None
     assert cfg["active_state"] == "on"
+    assert cfg["state_attribute"] is None
+    assert cfg["display_mode"] == "full"
 
 
 # --- target resolution -----------------------------------------------------
@@ -102,6 +113,25 @@ def test_excluding_everything_yields_no_targets():
 
 def test_missing_targets_yields_no_targets():
     assert resolve_notification_targets(_hass(), {}) == []
+
+
+def test_notification_uses_reusable_group_targets_and_exclusions():
+    groups = {
+        "common_alerts": {
+            "targets": {"entity_id": ["light.entry", "light.kitchen", "light.kid"]},
+            "exclude": {"entity_id": ["light.kid"]},
+        }
+    }
+    config = {
+        "slug": "doors_unlocked",
+        "groups": ["common_alerts"],
+        "targets": {"entity_id": ["light.garage"]},
+        "exclude": {"entity_id": ["light.kitchen"]},
+    }
+    assert resolve_notification_targets(_hass(), config, groups) == [
+        "light.entry",
+        "light.garage",
+    ]
 
 
 def test_area_target_includes_entities_inheriting_device_area():
@@ -186,8 +216,10 @@ def test_area_target_skips_disabled_and_config_entities():
 def test_targets_from_options_keys_by_slug():
     options = {
         "notifications": {
-            "one": {"targets": {"entity_id": ["light.a", "light.b"]},
-                    "exclude": {"entity_id": ["light.b"]}},
+            "one": {
+                "targets": {"entity_id": ["light.a", "light.b"]},
+                "exclude": {"entity_id": ["light.b"]},
+            },
             "two": {"targets": {"entity_id": ["light.c"]}},
         }
     }
@@ -225,10 +257,12 @@ def test_overlapping_groups_normalize_to_shared_physical_entity(monkeypatch):
         return result
 
     hass.states.get.side_effect = state
-    options = {"notifications": {
-        "bedrooms": {"targets": {"entity_id": ["light.bedrooms"]}},
-        "downstairs": {"targets": {"entity_id": ["light.downstairs"]}},
-    }}
+    options = {
+        "notifications": {
+            "bedrooms": {"targets": {"entity_id": ["light.bedrooms"]}},
+            "downstairs": {"targets": {"entity_id": ["light.downstairs"]}},
+        }
+    }
 
     resolved = targets_from_options(hass, options)
     assert "light.shared" in resolved["bedrooms"]
@@ -249,6 +283,63 @@ def test_group_target_can_exclude_concrete_member():
         "exclude": {"entity_id": ["light.exclude"]},
     }
     assert resolve_notification_targets(hass, cfg) == ["light.keep"]
+
+
+def test_zigbee2mqtt_group_entities_are_expanded():
+    hass = _hass()
+    group = MagicMock()
+    group.attributes = {
+        "group_entities": ["light.entry", "light.ceiling", "switch.dimmer"]
+    }
+    hass.states.get.side_effect = lambda entity_id: (
+        group if entity_id == "light.notify_area" else None
+    )
+
+    assert resolve_notification_targets(
+        hass, {"targets": {"entity_id": ["light.notify_area"]}}
+    ) == ["light.ceiling", "light.entry", "switch.dimmer"]
+
+
+def test_unavailable_single_entity_native_group_is_pending():
+    options = {
+        "groups": {
+            "bedroom_area": {
+                "targets": {"entity_id": ["light.notify_area_bedrooms"]},
+                "zigbee2mqtt_group": "notify/area/bedroom_area",
+            }
+        }
+    }
+    assert _pending_native_group_entities(_hass(), options) == {
+        "light.notify_area_bedrooms"
+    }
+
+
+def test_ready_single_entity_native_group_is_not_pending():
+    hass = _hass()
+    group = MagicMock()
+    group.attributes = {"group_entities": ["light.entry", "light.ceiling"]}
+    hass.states.get.return_value = group
+    options = {
+        "groups": {
+            "living_area": {
+                "targets": {"entity_id": ["light.notify_area_living_area"]},
+                "zigbee2mqtt_group": "notify/area/living_area",
+            }
+        }
+    }
+    assert _pending_native_group_entities(hass, options) == set()
+
+
+def test_explicit_multi_entity_native_group_does_not_wait_for_group_attributes():
+    options = {
+        "groups": {
+            "security": {
+                "targets": {"entity_id": ["light.entry", "light.ceiling"]},
+                "zigbee2mqtt_group": "notify/security",
+            }
+        }
+    }
+    assert _pending_native_group_entities(_hass(), options) == set()
 
 
 def test_nested_groups_are_expanded_and_deduplicated():
@@ -275,9 +366,9 @@ def test_nested_groups_are_expanded_and_deduplicated():
 
 
 def test_description_reaches_the_notification():
-    options = {"notifications": {"fridge_ajar": notification_config(
-        "fridge_ajar", _form()
-    )}}
+    options = {
+        "notifications": {"fridge_ajar": notification_config("fridge_ajar", _form())}
+    }
     notif = notifications_from_options(options)["fridge_ajar"]
     assert notif.description.startswith("A fridge has not cycled off")
 
@@ -303,16 +394,19 @@ def _v1_entry(targets, notifications):
 @pytest.mark.asyncio
 async def test_migration_pushes_pool_targets_into_each_notification():
     targets = {"entity_id": ["light.bedroom", "light.bathroom"]}
-    entry = _v1_entry(targets, {
-        "cooling": {"slug": "cooling", "display_name": "Cooling"},
-        "heating": {"slug": "heating", "display_name": "Heating"},
-    })
+    entry = _v1_entry(
+        targets,
+        {
+            "cooling": {"slug": "cooling", "display_name": "Cooling"},
+            "heating": {"slug": "heating", "display_name": "Heating"},
+        },
+    )
     hass = MagicMock()
 
     assert await async_migrate_entry(hass, entry) is True
 
     _, kwargs = hass.config_entries.async_update_entry.call_args
-    assert kwargs["version"] == 2
+    assert kwargs["version"] == 3
     migrated = kwargs["options"]["notifications"]
     assert migrated["cooling"]["targets"] == targets
     assert migrated["heating"]["targets"] == targets
@@ -323,9 +417,12 @@ async def test_migration_pushes_pool_targets_into_each_notification():
 
 @pytest.mark.asyncio
 async def test_migration_adds_empty_exclude_and_description():
-    entry = _v1_entry({"entity_id": ["light.x"]}, {
-        "cooling": {"slug": "cooling", "display_name": "Cooling"},
-    })
+    entry = _v1_entry(
+        {"entity_id": ["light.x"]},
+        {
+            "cooling": {"slug": "cooling", "display_name": "Cooling"},
+        },
+    )
     hass = MagicMock()
     await async_migrate_entry(hass, entry)
 
@@ -333,16 +430,23 @@ async def test_migration_adds_empty_exclude_and_description():
     cooling = kwargs["options"]["notifications"]["cooling"]
     assert cooling["exclude"] == {}
     assert cooling["description"] == ""
+    assert cooling["display_mode"] == "full"
 
 
 @pytest.mark.asyncio
 async def test_migration_preserves_existing_notification_fields():
-    entry = _v1_entry({"entity_id": ["light.x"]}, {
-        "cooling": {
-            "slug": "cooling", "display_name": "Cooling",
-            "color": "blue", "duration": 5, "priority": 50,
+    entry = _v1_entry(
+        {"entity_id": ["light.x"]},
+        {
+            "cooling": {
+                "slug": "cooling",
+                "display_name": "Cooling",
+                "color": "blue",
+                "duration": 5,
+                "priority": 50,
+            },
         },
-    })
+    )
     hass = MagicMock()
     await async_migrate_entry(hass, entry)
 
@@ -356,9 +460,12 @@ async def test_migration_preserves_existing_notification_fields():
 @pytest.mark.asyncio
 async def test_migration_does_not_clobber_targets_already_set():
     own = {"entity_id": ["light.own"]}
-    entry = _v1_entry({"entity_id": ["light.pool"]}, {
-        "cooling": {"slug": "cooling", "display_name": "Cooling", "targets": own},
-    })
+    entry = _v1_entry(
+        {"entity_id": ["light.pool"]},
+        {
+            "cooling": {"slug": "cooling", "display_name": "Cooling", "targets": own},
+        },
+    )
     hass = MagicMock()
     await async_migrate_entry(hass, entry)
 
@@ -367,9 +474,33 @@ async def test_migration_does_not_clobber_targets_already_set():
 
 
 @pytest.mark.asyncio
-async def test_migration_is_a_noop_for_v2_entries():
+async def test_migration_upgrades_v2_entries_with_groups_and_activation():
     entry = MagicMock()
     entry.version = 2
+    entry.data = {"name": "Notify Lights"}
+    entry.options = {
+        "notifications": {
+            "charging": {
+                "slug": "charging",
+                "display_name": "Charging",
+                "duration": 0,
+                "state_entity": "sensor.charger",
+            }
+        }
+    }
+    hass = MagicMock()
+
+    assert await async_migrate_entry(hass, entry) is True
+    _, kwargs = hass.config_entries.async_update_entry.call_args
+    assert kwargs["version"] == 3
+    assert kwargs["options"]["groups"] == {}
+    assert kwargs["options"]["notifications"]["charging"]["activation"] == "state_while"
+
+
+@pytest.mark.asyncio
+async def test_migration_is_a_noop_for_v3_entries():
+    entry = MagicMock()
+    entry.version = 3
     hass = MagicMock()
 
     assert await async_migrate_entry(hass, entry) is True

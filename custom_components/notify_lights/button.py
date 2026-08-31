@@ -1,4 +1,5 @@
 """Button entity for momentary (duration > 0) notifications."""
+
 from __future__ import annotations
 
 import logging
@@ -26,16 +27,15 @@ async def async_setup_entry(
     notifications = data["notifications"]
     targets = data["targets"]
 
-    momentary = [n for n in notifications.values() if n.is_momentary]
+    momentary = [n for n in notifications.values() if n.is_manual_momentary]
     _LOGGER.info(
         "Button platform setup: %d momentary of %d total notifications",
-        len(momentary), len(notifications),
+        len(momentary),
+        len(notifications),
     )
 
     entities = [
-        NotificationButton(
-            coordinator, notif, targets.get(notif.name, []), entry, hass
-        )
+        NotificationButton(coordinator, notif, targets.get(notif.name, []), entry, hass)
         for notif in momentary
     ]
     async_add_entities(entities)
@@ -58,9 +58,7 @@ class NotificationButton(ButtonEntity):
         self._entry_id = entry.entry_id
         self._hass = hass
         self._cancel_timer = None
-        self._attr_unique_id = (
-            f"notify_lights_{entry.entry_id}_{notification.name}"
-        )
+        self._attr_unique_id = f"notify_lights_{entry.entry_id}_{notification.name}"
         self._attr_name = notification.display_name
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
@@ -79,7 +77,8 @@ class NotificationButton(ButtonEntity):
     async def async_press(self, **kwargs) -> None:
         _LOGGER.info(
             "Button %s pressed (duration=%ds)",
-            self._notification.name, self._notification.duration,
+            self._notification.name,
+            self._notification.duration,
         )
         if self._cancel_timer is not None:
             self._cancel_timer()

@@ -1,133 +1,168 @@
 # Notify Lights
 
-Home Assistant custom integration for LED notifications on smart switches.
+Home Assistant custom integration for routing state notifications to LED bars on
+smart switches.
 
-## The model
+## The configuration model
 
-A config entry is a **catalog** of notifications. Each notification is a
-complete, self-describing thing:
+Notify Lights has two user-facing concepts.
 
-| Field | Meaning |
-|---|---|
-| `name` | Display name; slugified into the entity ID |
-| `description` | What this notification *means* — surfaced as an entity attribute |
-| `targets` | Where it shows: any mix of entities, devices and areas |
-| `exclude` | Subtracted from `targets` |
-| `color`, `effect`, `effect_speed`, `brightness` | What it looks like |
-| `duration` | `0` = stateful; `> 0` = momentary button that auto-clears |
-| `state_entity`, `active_state` | Optional direct source for stateful notifications |
-| `priority` | `0`–`100`; arbitrates when several are active on one light |
+### Light groups answer “where?”
 
-Appearance and priority live here rather than at the call site, so callers say
-*when* something is true and never *how it looks*. That split is what makes
-priority arbitration possible at all: you cannot decide whether a fridge alert
-outranks a charge-complete notification by looking at either automation.
+Create reusable destinations once, then use them from many rules:
 
-### Layering on Inovelli Blue switches
+- **Common alerts** — most switches, excluding the kids’ rooms
+- **Near garage** — Great Room Entry Lights and Great Room Ceiling Lights
+- **Bedrooms HVAC** / **Living HVAC** — the non-kid-bedroom switches in each zone
+- **Outside office** and **Outside bathroom** — one nearby switch each
+
+A light group accepts Home Assistant entities, devices, and areas. Its
+**Except** field subtracts entities, devices, or areas, making “the whole house
+except the kids’ rooms” a first-class configuration rather than a copied list.
+
+Editing a light group updates every notification rule that uses it.
+
+If the same switches belong to a Zigbee2MQTT group, enter that group's friendly
+name in **Zigbee2MQTT group** (for example, `notify/security`). Notify Lights
+then sends one native Zigbee groupcast whenever every member needs the same LED
+layout. If another notification makes member layouts differ, it automatically
+falls back to rendering those switches individually. The Home Assistant target
+selection and Zigbee2MQTT group membership must describe the same switches.
+
+### Notification rules answer “when and what?”
+
+Every rule has an explicit activation behavior:
+
+| Behavior | Resulting HA entity | Use it for |
+|---|---|---|
+| Show while an entity is in a state | Binary sensor | Charging, unlocked, door open, heating/cooling, occupied |
+| Show for a time when an entity enters a state | Binary sensor with timer | Charger ready, package delivered |
+| Manual, stays on until turned off | Switch | Conditions controlled by an existing automation |
+| Manual, turns off after a time | Button | Impulses controlled by an existing automation |
+
+There is no hidden “duration 0 changes the entity type” choice in the UI. Timed
+rules ask for a duration; while-active rules do not.
+
+Automatic rules ask for a source entity, then show its main state and current
+attributes in plain language. A climate rule can watch hvac_action directly;
+there is no need to create an intermediate template sensor. Notify Lights
+offers values reported by the chosen property (including enum options when
+available), while still allowing a custom value.
+
+Each rule chooses one or more light groups, optional additional targets, an
+optional exclusion, and its color/effect/brightness/priority. Coverage is an
+explicit choice between the full light bar and a one-pixel bottom indicator.
+
+## Tesla example
+
+First create **Near garage** containing:
+
+- light.great_room_entry_lights_2
+- light.great_room_ceiling_lights
+
+Then create two rules:
+
+| Rule | Activation | Source | State | Duration |
+|---|---|---|---|---|
+| Tesla charging | Show while in state | sensor.tesla_wall_connector_status | charging | While charging |
+| Tesla charger ready | Show when state is entered | sensor.tesla_wall_connector_status | ready | 300 seconds |
+
+Both rules route to **Near garage**. Charging synchronizes immediately after a
+Home Assistant restart. Ready is edge-triggered and deliberately does not replay
+merely because Home Assistant starts while the sensor already says ready.
+
+## Suggested rule layout
+
+The use cases below become a small number of groups plus straightforward rules:
+
+| Situation | Light group | Source-state strategy |
+|---|---|---|
+| Doors unlocked | Common alerts | One while-state rule per lock, or a template binary sensor aggregating locks |
+| Backdoors open | Common alerts | While open |
+| Heat / cool | HVAC zone group | Follow hvac_action; low priority; one-pixel indicator |
+| Tesla charging / ready | Near garage | While charging; 300 seconds on entering ready |
+| On a call | Outside office | While on call |
+| Bathroom occupied | Outside bathroom | While occupied |
+| Fridge door open | Common alerts | While open |
+| Package at door | Common alerts | Timed on entering detected/delivered |
+| Garage door | Common alerts | Separate opening, closing, and open rules sharing one source and group |
+
+A situation with visually distinct states is intentionally represented by
+multiple rules. They share the source and group, but each state owns its
+appearance and timeout. That keeps priority arbitration and testing simple.
+
+## Layering on Inovelli Blue switches
 
 The Zigbee2MQTT adapter keeps the two highest-priority active notifications
-visible. With one notification, the switch uses its native full-bar effect.
-With two or more, LED 1 (the bottom pixel) becomes a solid indicator in the
-second-priority notification's color, while LEDs 2–7 render the top-priority
-notification. Notifications below those two stay in the active stack and move
+visible. A full-bar rule uses the native full-bar effect when alone. A one-pixel
+rule always stays on the bottom pixel, even when it is the only active rule. If
+a full-bar and an indicator are active together, the indicator owns LED 1 and
+the full notification owns LEDs 2–7. Two legacy full-bar rules retain the same
+layered behavior. Lower-priority notifications remain in the stack and move
 into view as higher-priority notifications clear.
 
-Layered bars use Zigbee2MQTT's `individual_led_effect` command. That command
-has a smaller animation set than the full-bar command: blink falls back to slow
-or fast (medium uses fast), and chase/falling/rising use the one speed exposed
-by Zigbee2MQTT. The bottom priority indicator is intentionally always solid.
+The adapter treats the switch like a small shadow DOM: a native full-bar
+effect is the base layer and individual LED effects override only the pixels
+they occupy. It remembers the last commanded layers for each physical switch
+and sends only changes. Adding or removing one indicator normally costs one
+Zigbee command; the underlying full-bar animation resumes when that indicator
+is cleared. On the first render after startup, and during explicit teardown,
+all eight independently latched layers are reconciled so an old notification
+cannot leak through.
 
-To preview a stack in a true-color terminal without a switch:
+Zigbee2MQTT has separate `clear_effect` commands for the full bar and for each
+of LEDs 1–7; it does not expose a writable clear-all command. The adapter uses
+the smallest applicable clear once state is known. Individual blink falls back
+to slow or fast (medium uses fast), and chase/falling/rising use the one speed
+exposed by Zigbee2MQTT. The bottom priority indicator is always solid.
 
-```console
-python scripts/preview_inovelli_bar.py \
-  urgent:red:90:pulse:fast \
-  hvac:blue:30:solid \
-  --commands
-```
+Priority 30 and below is reserved for minor notifications. These rules always
+have a one-pixel footprint in the normal stack, even when their configured
+coverage is Full bar. They behave like any other backgrounded, squashed
+notification rather than being pinned to a particular LED. This keeps state
+such as active heating or cooling visible without taking over the switch.
 
-Each argument is
-`NAME:COLOR:PRIORITY[:EFFECT[:SPEED[:BRIGHTNESS]]]`. Add `--no-color` for a
-plain-text preview. `--commands` also prints the exact Zigbee2MQTT payloads.
+To preview a stack in a true-color terminal:
 
-### Calling it
+    python scripts/preview_inovelli_bar.py \
+      urgent:red:90:pulse:fast \
+      hvac:blue:30:solid \
+      --commands
 
-Nothing to configure at the call site — a notification is just an entity:
+Each argument is NAME:COLOR:PRIORITY[:EFFECT[:SPEED[:BRIGHTNESS]]]. Add
+--no-color for a plain-text preview. --commands prints the exact Zigbee2MQTT
+payloads.
 
-```yaml
-# manually stateful (duration: 0, no source) — held until turned off
-- action: switch.turn_on
-  target:
-    entity_id: switch.notify_fridge_ajar_kitchen
+## Calling manual rules
 
-# momentary (duration > 0) — clears itself
-- action: button.press
-  target:
-    entity_id: button.notify_hvac_cooling_bedrooms
-```
+Manual rules remain ordinary Home Assistant entities:
 
-A stateful notification with a source entity needs no calling automation. It
-is exposed as a read-only binary sensor, subscribes to the source, and evaluates
-it immediately at setup:
+    # Manual, stays on
+    - action: switch.turn_on
+      target:
+        entity_id: switch.notify_lights_fridge_ajar
 
-```
-state_entity: lock.front_door_lock
-active_state: unlocked
-```
+    # Manual, timed
+    - action: button.press
+      target:
+        entity_id: button.notify_lights_package_at_door
 
-This is preferable when HA already has an entity representing the fact. It is
-restart-safe and avoids duplicating `on`/`off` synchronization in an automation.
-Leave the source empty only when the notification must be controlled manually;
-that form remains a switch. Impulses remain buttons.
+Automatic rules need no calling automation. Their binary sensors expose the
+source, matching state, duration, priority, and resolved physical targets as
+attributes.
 
-### Why targets live on the notification
+## Upgrading to 0.8.0
 
-A notification entity cannot take call-time target parameters, so its
-definition is the only place its targets can live. Before v2 the config entry
-was a *pool* of lights holding several notifications, which forced the same
-notification to be redefined once per pool. Those copies drifted: `cooling`
-existed twice with different durations, and Home Assistant disambiguated the
-duplicate names into `notify_cooling` and `notify_cooling_2`, pushing the
-ambiguity back onto callers.
+Entries migrate automatically to config version 3:
 
-### Targeting
+- v1 pool targets remain attached to their existing notifications.
+- v2 notifications gain explicit activation behavior and an empty reusable
+  group list. Existing rules default to full-bar coverage and main-state
+  matching.
+- Existing entity unique IDs and notification slugs remain unchanged.
 
-Prefer areas or light groups over individual switches. Group entities are
-expanded to their members (recursively, up to 3 levels) before activation, so
-notifications reaching one physical switch through different selectors share
-the same priority stack. Targeting one area light group keeps working as
-switches are added to that area and the integration is reloaded.
-
-`exclude` exists for the case enumeration handles badly — "the whole house
-except the kids' rooms":
-
-```
-targets:  light.magic_areas_light_groups_interior_all_lights
-exclude:  areas [Cardiff's Room, Hana's Room]
-```
-
-### Naming
-
-Put the zone in the name: "cooling in the bedrooms" is a genuinely different
-fact from "cooling in the living area", with a different trigger and different
-lights. Pick an ordering and hold it — system-first (`hvac_cooling_bedrooms`,
-`hvac_heating_bedrooms`, `fridge_ajar_kitchen`) keeps related notifications
-together as the catalog grows.
-
-## Upgrading to 0.4.0
-
-Config entries migrate automatically (v1 → v2): each notification inherits the
-targets its pool used to own, and gains an empty `exclude` and `description`.
-
-Entries are migrated **in place**, not merged into a single catalog — slugs are
-only unique within an entry, so merging could collide. If you were running one
-pool per area, you will end up with one catalog per area, each notification now
-carrying its own targets. Consolidating into a single catalog is a manual step:
-recreate the notifications in one entry and delete the others.
-
-Manual stateful switches restore their active state after an integration reload
-or Home Assistant restart. Source-bound binary sensors re-evaluate their source
-at setup. Repeated activation is idempotent in either case.
+The migration does not invent groups from old targets. Existing rules keep
+working as before; groups can be introduced gradually through the options flow.
 
 ## References
 

@@ -31,7 +31,8 @@ def test_preview_script_shows_priority_layers_and_z2m_commands():
     assert "Ready (solid, 120°)" in lines[6]
     assert '"effect":"clear_effect"' in result.stdout
     assert '"led":"1","effect":"solid","color":85,"level":75' in result.stdout
-    assert '"led":"7","effect":"pulse","color":0,"level":100' in result.stdout
+    assert '"led_effect":{"effect":"pulse","color":0,"level":100' in result.stdout
+    assert '"led":"7","effect":"clear_effect"' in result.stdout
 
 
 def test_preview_script_reports_invalid_notification():

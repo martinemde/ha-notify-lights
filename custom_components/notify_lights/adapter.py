@@ -4,6 +4,7 @@ Each adapter targets a specific manufacturer/model family and implements the
 render/clear protocol. The registry matches devices using glob patterns so a
 single adapter can cover an entire product line (e.g. "VZM31*").
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -11,6 +12,8 @@ from fnmatch import fnmatch
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from homeassistant.helpers.device_registry import DeviceEntry
+
     from .active_set import ActiveEntry
     from .const import Effect
 
@@ -24,6 +27,10 @@ class NotificationAdapter(ABC):
     supported_effects: set[Effect]
     # Maps unsupported effects to the closest supported substitute.
     effect_fallbacks: dict[Effect, Effect]
+
+    def target_for_device(self, device: DeviceEntry) -> str:
+        """Return the adapter-specific command target for a device."""
+        return device.name
 
     @abstractmethod
     async def render(self, target: str, active: list[ActiveEntry]) -> None:

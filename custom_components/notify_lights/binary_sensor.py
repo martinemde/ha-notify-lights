@@ -1,4 +1,5 @@
 """Binary sensor entities for notifications bound to source state."""
+
 from __future__ import annotations
 
 import logging
@@ -9,7 +10,7 @@ from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import Event, HomeAssistant, State
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 
 from .const import DOMAIN
 from .notification import Notification
@@ -63,9 +64,10 @@ class StateNotificationBinarySensor(BinarySensorEntity):
         self._entry_id = entry.entry_id
         self._attr_is_on = None
         self._attr_available = False
-        self._attr_unique_id = (
-            f"notify_lights_{entry.entry_id}_{notification.name}"
-        )
+        self._last_source_value: str | None = None
+        self._source_initialized = False
+        self._cancel_timer = None
+        self._attr_unique_id = f"notify_lights_{entry.entry_id}_{notification.name}"
         self._attr_name = notification.display_name
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
@@ -79,7 +81,14 @@ class StateNotificationBinarySensor(BinarySensorEntity):
             "priority": self._notification.priority,
             "targets": self._targets,
             "state_entity": self._notification.state_entity,
+            "state_attribute": self._notification.state_attribute,
             "active_state": self._notification.active_state,
+            "activation": (
+                "state_entered"
+                if self._notification.is_source_momentary
+                else "state_while"
+            ),
+            "duration": self._notification.duration,
         }
 
     async def async_added_to_hass(self) -> None:
@@ -94,13 +103,18 @@ class StateNotificationBinarySensor(BinarySensorEntity):
                 self._async_source_changed,
             )
         )
-        await self._async_apply_source_state(self.hass.states.get(source_entity))
+        self.async_on_remove(self._cancel_active_timer)
+        await self._async_apply_source_state(
+            self.hass.states.get(source_entity), initial=True
+        )
 
     async def _async_source_changed(self, event: Event) -> None:
         """Apply one source entity state-change event."""
         await self._async_apply_source_state(event.data.get("new_state"))
 
-    async def _async_apply_source_state(self, source: State | None) -> None:
+    async def _async_apply_source_state(
+        self, source: State | None, *, initial: bool = False
+    ) -> None:
         """Synchronize the notification with a source state."""
         if source is None or source.state in {STATE_UNKNOWN, STATE_UNAVAILABLE}:
             self._attr_available = False
@@ -108,7 +122,28 @@ class StateNotificationBinarySensor(BinarySensorEntity):
             return
 
         self._attr_available = True
-        active = source.state == self._notification.active_state
+        was_initialized = self._source_initialized
+        self._source_initialized = True
+        source_value = self._source_value(source)
+        previous_source_value = self._last_source_value
+        self._last_source_value = source_value
+        active = source_value == self._notification.active_state
+
+        if self._notification.is_source_momentary:
+            # Edge-triggered rules do not replay on integration setup. They
+            # activate only when the source *enters* the configured state.
+            if self._attr_is_on is None:
+                self._attr_is_on = False
+            if (
+                was_initialized
+                and not initial
+                and active
+                and previous_source_value != source_value
+            ):
+                await self._async_activate_timed()
+            self.async_write_ha_state()
+            return
+
         previous = self._attr_is_on
         self._attr_is_on = active
 
@@ -126,3 +161,42 @@ class StateNotificationBinarySensor(BinarySensorEntity):
             )
 
         self.async_write_ha_state()
+
+    def _source_value(self, source: State) -> str:
+        """Read either the entity state or its configured attribute."""
+        if self._notification.state_attribute:
+            value = source.attributes.get(self._notification.state_attribute)
+            return "" if value is None else str(value)
+        return source.state
+
+    async def _async_activate_timed(self) -> None:
+        """Activate or restart an edge-triggered notification timer."""
+        self._cancel_active_timer()
+        self._attr_is_on = True
+        await self._coordinator.async_activate(
+            self._notification,
+            self._targets,
+            self._entry_id,
+        )
+        self._cancel_timer = async_call_later(
+            self.hass,
+            self._notification.duration,
+            self._async_timer_finished,
+        )
+
+    async def _async_timer_finished(self, _now=None) -> None:
+        """Clear a timed source notification."""
+        self._cancel_timer = None
+        self._attr_is_on = False
+        await self._coordinator.async_deactivate(
+            self._notification,
+            self._targets,
+            self._entry_id,
+        )
+        self.async_write_ha_state()
+
+    def _cancel_active_timer(self) -> None:
+        """Cancel the current timer, if any."""
+        if self._cancel_timer is not None:
+            self._cancel_timer()
+            self._cancel_timer = None

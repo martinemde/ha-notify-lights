@@ -1,13 +1,14 @@
 """Tests for notifications bound directly to source entity state."""
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock
 
 from custom_components.notify_lights.binary_sensor import (
     StateNotificationBinarySensor,
 )
 from custom_components.notify_lights.const import Effect, Speed
 from custom_components.notify_lights.notification import Notification
-
 
 TARGETS = ["light.entry"]
 ENTRY_ID = "catalog_1"
@@ -28,6 +29,21 @@ def _notification():
     )
 
 
+def _timed_notification():
+    return Notification(
+        name="tesla_charger_ready",
+        display_name="Tesla charger ready",
+        color=120,
+        brightness=100,
+        effect=Effect.PULSE,
+        effect_speed=Speed.MEDIUM,
+        duration=300,
+        priority=60,
+        state_entity="sensor.tesla_wall_connector_status",
+        active_state="ready",
+    )
+
+
 def _entry():
     entry = MagicMock()
     entry.entry_id = ENTRY_ID
@@ -37,6 +53,7 @@ def _entry():
 def _state(value):
     state = MagicMock()
     state.state = value
+    state.attributes = {}
     return state
 
 
@@ -94,3 +111,91 @@ def test_attributes_expose_source_binding():
     )
     assert entity.extra_state_attributes["state_entity"] == "lock.front_door_lock"
     assert entity.extra_state_attributes["active_state"] == "unlocked"
+    assert entity.extra_state_attributes["activation"] == "state_while"
+
+
+@pytest.mark.asyncio
+async def test_timed_source_activates_only_when_state_is_entered():
+    coordinator = AsyncMock()
+    entity = StateNotificationBinarySensor(
+        coordinator, _timed_notification(), TARGETS, _entry()
+    )
+    entity.hass = MagicMock()
+
+    # Ready at setup is synchronization, not an event to replay.
+    await entity._async_apply_source_state(_state("ready"), initial=True)
+    coordinator.async_activate.assert_not_called()
+
+    await entity._async_apply_source_state(_state("charging"))
+    with patch(
+        "custom_components.notify_lights.binary_sensor.async_call_later",
+        return_value=MagicMock(),
+    ) as call_later:
+        await entity._async_apply_source_state(_state("ready"))
+
+    coordinator.async_activate.assert_called_once()
+    assert entity.is_on is True
+    assert call_later.call_args.args[1] == 300
+
+
+@pytest.mark.asyncio
+async def test_timed_source_deactivates_when_timer_finishes():
+    coordinator = AsyncMock()
+    entity = StateNotificationBinarySensor(
+        coordinator, _timed_notification(), TARGETS, _entry()
+    )
+    entity.hass = MagicMock()
+    await entity._async_apply_source_state(_state("charging"), initial=True)
+
+    with patch(
+        "custom_components.notify_lights.binary_sensor.async_call_later",
+        return_value=MagicMock(),
+    ):
+        await entity._async_apply_source_state(_state("ready"))
+        await entity._async_timer_finished()
+
+    assert entity.is_on is False
+    coordinator.async_deactivate.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_timed_source_does_not_replay_when_first_available_state_is_ready():
+    coordinator = AsyncMock()
+    entity = StateNotificationBinarySensor(
+        coordinator, _timed_notification(), TARGETS, _entry()
+    )
+    entity.hass = MagicMock()
+
+    await entity._async_apply_source_state(_state("unavailable"), initial=True)
+    await entity._async_apply_source_state(_state("ready"))
+
+    assert entity.is_on is False
+    assert entity.available is True
+    coordinator.async_activate.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_source_attribute_can_drive_hvac_notification():
+    notification = Notification(
+        name="bedrooms_heating",
+        display_name="Bedrooms heating",
+        color=0,
+        brightness=50,
+        effect=Effect.SOLID,
+        effect_speed=Speed.MEDIUM,
+        duration=0,
+        priority=20,
+        state_entity="climate.bedrooms",
+        state_attribute="hvac_action",
+        active_state="heating",
+    )
+    coordinator = AsyncMock()
+    entity = StateNotificationBinarySensor(coordinator, notification, TARGETS, _entry())
+    source = _state("heat")
+    source.attributes = {"hvac_action": "heating"}
+
+    await entity._async_apply_source_state(source)
+
+    assert entity.is_on is True
+    assert entity.extra_state_attributes["state_attribute"] == "hvac_action"
+    coordinator.async_activate.assert_called_once()
