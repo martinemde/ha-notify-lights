@@ -9,30 +9,29 @@ Notify Lights has two user-facing concepts.
 
 ### A catalog is a device group
 
-Each Notify Lights device (config entry) has a name and one fixed set of
-physical Inovelli devices, chosen when you create it and editable afterward
-from its device page under **Edit Inovelli devices**. Every notification rule
-inside a catalog shares that same device set — there is nothing to route per
-rule. Areas that should light up differently get their own catalog, for
-example:
+Each Notify Lights device (config entry) has a name and one fixed target: one
+native Zigbee2MQTT group, or a set of physical Inovelli devices. It is chosen
+when you create the catalog and editable afterward from its device page under
+**Edit notification lights**. Every notification rule inside a catalog shares
+that same target set — there is nothing to route per rule. Areas that should
+light up differently get their own catalog, for example:
 
 - **Common alerts** — most switches, excluding the kids’ rooms
 - **Near garage** — Great Room Entry Lights and Great Room Ceiling Lights
 - **Bedrooms HVAC** / **Living HVAC** — the non-kid-bedroom switches in each zone
 - **Outside office** and **Outside bathroom** — one nearby switch each
 
-The picker lists only physical Inovelli devices backed by Zigbee2MQTT. Older
-catalogs that targeted light entities, areas, or group lights are expanded to
-their physical members when opened; saving the form stores those device IDs.
-Editing the device set updates every notification rule inside the catalog
-immediately.
+The picker lists Zigbee2MQTT group devices and physical Inovelli devices. Pick
+one group by itself to retain its dynamic membership and use native Zigbee
+groupcasts, or pick individual devices. For a group, Notify Lights joins the
+group's real numeric Zigbee ID to Zigbee2MQTT's retained
+`zigbee2mqtt/bridge/groups` registry and uses the exact published
+`friendly_name`; there is no manually entered topic or naming convention.
 
-If the same switches belong to a Zigbee2MQTT group, enter that group's friendly
-name in **Zigbee2MQTT group** (for example, `notify/security`). Notify Lights
-then sends one native Zigbee groupcast whenever every member needs the same LED
-layout. If another notification makes member layouts differ, it automatically
-falls back to rendering those switches individually. The selected Inovelli
-devices and Zigbee2MQTT group membership must describe the same switches.
+If another notification makes member layouts differ, Notify Lights
+automatically falls back to rendering those switches individually. Older
+non-Zigbee group/area/entity selectors are expanded to physical devices when
+opened.
 
 ### Notification rules answer “when and what?”
 
@@ -56,8 +55,8 @@ available), while still allowing a custom value.
 
 Each rule chooses its color/effect/brightness/priority. Coverage is an
 explicit choice between the full light bar and a one-pixel bottom indicator.
-Where it shows is decided once, for the whole catalog, under **Edit Inovelli
-devices**.
+Where it shows is decided once, for the whole catalog, under **Edit notification
+lights**.
 
 ## Tesla example
 
@@ -185,6 +184,13 @@ Automatic rules need no calling automation. Their binary sensors expose the
 source, matching state, duration, priority, and resolved physical targets as
 attributes.
 
+## Upgrading to 0.9.2
+
+Native Zigbee2MQTT groups can be selected directly again. Their membership
+remains dynamic, and their exact MQTT friendly names are read from
+Zigbee2MQTT's retained group registry instead of being typed manually. Choose
+one native group or a set of individual Inovelli devices, but not both.
+
 ## Upgrading to 0.9.1
 
 The target form now selects physical Inovelli devices instead of Home
@@ -193,10 +199,8 @@ entity, area, exclusion, and group-light selectors to the physical devices
 they currently resolve to. Saving replaces those legacy selectors with the
 selected device IDs; no startup migration or entity IDs change.
 
-The optional Zigbee2MQTT group remains separate because it is a transport
-optimization: it sends one native groupcast when every selected device needs
-the same LED layout, with automatic per-device fallback when their stacks
-diverge.
+Version 0.9.2 supersedes the manually entered Zigbee2MQTT group field by
+selecting the real group device and deriving its transport name.
 
 ## Upgrading to 0.9.0
 

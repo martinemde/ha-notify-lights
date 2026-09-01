@@ -30,6 +30,7 @@ from .adapters.inovelli_blue_z2m import InovelliBlueZ2MAdapter
 from .const import DOMAIN, NAMED_COLORS, DisplayMode, Effect, Speed
 from .coordinator import NotifyLightsCoordinator, TransportGroup
 from .notification import Notification
+from .z2m_groups import async_friendly_name_for_device, group_devices_from_targets
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -261,6 +262,27 @@ def _pending_native_group_entities(hass: HomeAssistant, options: dict) -> set[st
     """
     if not str(options.get("zigbee2mqtt_group", "")).strip():
         return set()
+
+    native_group_devices = group_devices_from_targets(
+        hass, options.get("targets", {})
+    )
+    if len(native_group_devices) == 1:
+        entity_registry = er.async_get(hass)
+        entity_ids = [
+            entity.entity_id
+            for entity in er.async_entries_for_device(
+                entity_registry, native_group_devices[0].id
+            )
+            if entity.domain in SUPPORTED_DOMAINS
+            and entity.disabled_by is None
+            and entity.entity_category is None
+        ]
+        return {
+            entity_id
+            for entity_id in entity_ids
+            if not _state_group_members(hass.states.get(entity_id))
+        }
+
     entity_ids = options.get("targets", {}).get("entity_id", [])
     if len(entity_ids) != 1:
         return set()
@@ -427,12 +449,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         slug: coordinator.supported_targets(resolved)
         for slug, resolved in targets_from_options(hass, entry.options).items()
     }
+    transport_options = dict(entry.options)
+    native_group_devices = group_devices_from_targets(
+        hass, entry.options.get("targets", {})
+    )
+    if len(native_group_devices) == 1:
+        try:
+            exact_name = await async_friendly_name_for_device(
+                hass, native_group_devices[0]
+            )
+        except Exception:  # MQTT may still be reconnecting during startup.
+            _LOGGER.exception(
+                "Could not refresh the Zigbee2MQTT group registry for catalog %s; "
+                "using its last resolved friendly name",
+                entry.entry_id,
+            )
+        else:
+            if exact_name is not None:
+                transport_options["zigbee2mqtt_group"] = exact_name
+
     coordinator.register_transport_groups(
         entry.entry_id,
         transport_groups_from_options(
             hass,
             coordinator,
-            entry.options,
+            transport_options,
             name=entry.data.get("name", "Notify Lights"),
         ),
     )

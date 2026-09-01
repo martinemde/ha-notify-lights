@@ -1,8 +1,7 @@
 """Tests for the Notify Lights config and options flows.
 
-A catalog is created with a name and one fixed set of physical Inovelli
-devices, editable afterward under "Edit Inovelli devices". Every notification
-rule inside it shares that device set -- there is nothing to route per rule.
+A catalog is created with one native Zigbee2MQTT group or one fixed set of
+physical Inovelli devices. Every notification rule shares that target set.
 """
 
 import json
@@ -72,10 +71,7 @@ async def test_targets_step_creates_v4_catalog_with_its_target_set():
     await flow.async_step_user(user_input={"name": "Home Notifications"})
 
     result = await flow.async_step_targets(
-        {
-            "targets": DEVICE_IDS,
-            "zigbee2mqtt_group": "notify/near_garage",
-        }
+        {"targets": DEVICE_IDS}
     )
 
     assert result["type"] == "create_entry"
@@ -84,7 +80,7 @@ async def test_targets_step_creates_v4_catalog_with_its_target_set():
     assert result["options"] == {
         "targets": TARGETS,
         "exclude": {},
-        "zigbee2mqtt_group": "notify/near_garage",
+        "zigbee2mqtt_group": "",
         "notifications": {},
     }
 
@@ -149,7 +145,7 @@ def test_options_menu_translations_cover_every_emitted_option():
     menu_options = strings["options"]["step"]["init"]["menu_options"]
 
     assert menu_options == {
-        "edit_targets": "Edit Inovelli devices",
+        "edit_targets": "Edit notification lights",
         "add_notification": "Add notification rule",
         "modify_notification": "Edit notification rule",
         "delete_notification": "Delete notification rule",
@@ -188,22 +184,74 @@ def test_existing_entity_targets_are_presented_as_physical_devices():
         ) == ["inovelli-device"]
 
 
+def test_native_z2m_group_is_presented_intact_in_target_picker():
+    hass = MagicMock()
+    group_device = MagicMock(id="z2m-group-device")
+    with patch(
+        "custom_components.notify_lights.config_flow.group_devices_from_targets",
+        return_value=[group_device],
+    ):
+        assert _device_ids_from_options(
+            hass, {"targets": {"entity_id": ["light.notify_area_living_area"]}}
+        ) == ["z2m-group-device"]
+
+
 # --- editing a catalog's targets -----------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_edit_targets_saves_the_new_target_set():
     flow = _flow()
-    result = await flow.async_step_edit_targets(
-        {
-            "targets": ["device-new"],
-            "zigbee2mqtt_group": "notify/updated",
-        }
-    )
+    result = await flow.async_step_edit_targets({"targets": ["device-new"]})
     assert result["type"] == "create_entry"
     assert result["data"]["targets"] == {"device_id": ["device-new"]}
     assert result["data"]["exclude"] == {}
-    assert result["data"]["zigbee2mqtt_group"] == "notify/updated"
+    assert result["data"]["zigbee2mqtt_group"] == ""
+
+
+@pytest.mark.asyncio
+async def test_edit_targets_derives_exact_z2m_group_name_from_registry():
+    flow = _flow()
+    group_device = MagicMock(
+        id="z2m-group-device",
+        manufacturer="Zigbee2MQTT",
+        model="Group",
+        identifiers={("mqtt", "zigbee2mqtt_network_16")},
+    )
+    with (
+        patch(
+            "custom_components.notify_lights.config_flow.group_devices_from_targets",
+            return_value=[group_device],
+        ),
+        patch(
+            "custom_components.notify_lights.config_flow.async_friendly_name_for_device",
+            return_value="notify/area/living_area",
+        ) as resolve_name,
+    ):
+        result = await flow.async_step_edit_targets(
+            {"targets": ["z2m-group-device"]}
+        )
+
+    assert result["type"] == "create_entry"
+    assert result["data"]["targets"] == {"device_id": ["z2m-group-device"]}
+    assert result["data"]["zigbee2mqtt_group"] == "notify/area/living_area"
+    resolve_name.assert_awaited_once_with(flow.hass, group_device)
+
+
+@pytest.mark.asyncio
+async def test_edit_targets_rejects_mixing_native_group_and_devices():
+    flow = _flow()
+    group_device = MagicMock(id="z2m-group-device")
+    with patch(
+        "custom_components.notify_lights.config_flow.group_devices_from_targets",
+        return_value=[group_device],
+    ):
+        result = await flow.async_step_edit_targets(
+            {"targets": ["z2m-group-device", "device-new"]}
+        )
+
+    assert result["type"] == "form"
+    assert result["errors"]["base"] == "group_or_devices"
 
 
 @pytest.mark.asyncio

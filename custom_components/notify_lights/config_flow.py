@@ -1,9 +1,9 @@
 """Config and options flows for Notify Lights.
 
-A catalog (config entry) has one fixed set of physical Inovelli devices,
-chosen when the catalog is created and editable afterward under "Edit
-Inovelli devices". Every notification rule inside it shares that device set --
-there is nothing to route per rule.
+A catalog (config entry) has one fixed target: either a native Zigbee2MQTT
+group or a set of physical Inovelli devices. It is editable afterward under
+"Edit notification lights". Every notification rule inside it shares that
+target set -- there is nothing to route per rule.
 
 Activation is selected explicitly. Duration is never used as a hidden type
 switch in the UI, even though the compact stored/runtime model still represents
@@ -39,6 +39,12 @@ from .const import (
     DisplayMode,
     Effect,
     Speed,
+)
+from .z2m_groups import (
+    Z2M_GROUP_MODEL,
+    Z2M_MANUFACTURER,
+    async_friendly_name_for_device,
+    group_devices_from_targets,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -91,6 +97,10 @@ TARGET_DEVICE_ENTITY_FILTER = selector.EntityFilterSelectorConfig(
 INOVELLI_DEVICE_FILTER = selector.DeviceFilterSelectorConfig(
     manufacturer=InovelliBlueZ2MAdapter.manufacturer
 )
+Z2M_GROUP_DEVICE_FILTER = selector.DeviceFilterSelectorConfig(
+    manufacturer=Z2M_MANUFACTURER,
+    model=Z2M_GROUP_MODEL,
+)
 
 
 def _slugify(name: str) -> str:
@@ -99,18 +109,22 @@ def _slugify(name: str) -> str:
 
 
 def _device_selector() -> selector.DeviceSelector:
-    """Select physical Inovelli devices backed by Zigbee2MQTT entities."""
+    """Select one native Z2M group or physical Inovelli devices."""
     return selector.DeviceSelector(
         selector.DeviceSelectorConfig(
             multiple=True,
             entity=[TARGET_DEVICE_ENTITY_FILTER],
-            filter=[INOVELLI_DEVICE_FILTER],
+            filter=[INOVELLI_DEVICE_FILTER, Z2M_GROUP_DEVICE_FILTER],
         )
     )
 
 
 def _device_ids_from_options(hass, options: dict[str, Any]) -> list[str]:
-    """Present legacy entity/group targets as their physical Inovelli devices."""
+    """Present a native Z2M group intact, otherwise show physical devices."""
+    native_groups = group_devices_from_targets(hass, options.get("targets", {}))
+    if native_groups:
+        return [device.id for device in native_groups]
+
     resolved_entities = resolve_entry_targets(hass, options)
     if not resolved_entities:
         return []
@@ -139,6 +153,27 @@ def _device_ids_from_options(hass, options: dict[str, Any]) -> list[str]:
 def _targets_from_device_ids(device_ids: list[str]) -> dict[str, list[str]]:
     """Store device-selector values in the target structure used at runtime."""
     return {"device_id": sorted(set(device_ids))}
+
+
+async def _validated_target_options(
+    hass, device_ids: list[str]
+) -> tuple[dict[str, list[str]], str, str | None]:
+    """Validate target mode and derive an exact native group friendly name."""
+    targets = _targets_from_device_ids(device_ids)
+    native_groups = group_devices_from_targets(hass, targets)
+    if native_groups and (len(native_groups) != 1 or len(set(device_ids)) != 1):
+        return targets, "", "group_or_devices"
+    if not native_groups:
+        return targets, "", None
+
+    try:
+        friendly_name = await async_friendly_name_for_device(hass, native_groups[0])
+    except Exception:
+        _LOGGER.exception("Could not read the Zigbee2MQTT group registry")
+        return targets, "", "z2m_registry_unavailable"
+    if friendly_name is None:
+        return targets, "", "z2m_group_not_found"
+    return targets, friendly_name, None
 
 
 def _activation_for_config(config: dict[str, Any]) -> Activation:
@@ -196,13 +231,11 @@ def _description_field(current: dict[str, Any]) -> tuple[Any, Any]:
 
 
 def _targets_schema(hass, defaults: dict[str, Any] | None = None) -> vol.Schema:
-    """Build the catalog-wide Inovelli device selection form.
+    """Build the catalog-wide target selection form.
 
-    Existing entity, area, and group-light targets are expanded to physical
-    devices for display. Saving the form replaces that legacy selector with
-    explicit device IDs. If the same devices also belong to a Zigbee2MQTT
-    group, naming it here lets Notify Lights send one native groupcast instead
-    of one command per switch.
+    A genuine Zigbee2MQTT group stays a group and its friendly MQTT name is
+    resolved from Zigbee2MQTT's retained group registry. Other legacy target
+    selectors are expanded and displayed as physical Inovelli devices.
     """
     current = defaults or {}
     return vol.Schema(
@@ -210,10 +243,6 @@ def _targets_schema(hass, defaults: dict[str, Any] | None = None) -> vol.Schema:
             vol.Required(
                 "targets", default=_device_ids_from_options(hass, current)
             ): _device_selector(),
-            vol.Optional(
-                "zigbee2mqtt_group",
-                default=current.get("zigbee2mqtt_group", ""),
-            ): selector.TextSelector(),
         }
     )
 
@@ -456,19 +485,23 @@ class NotifyLightsConfigFlow(ConfigFlow, domain=DOMAIN):
             if not _has_targets(user_input.get("targets")):
                 errors["base"] = "target_required"
             else:
-                _LOGGER.info("Creating notification catalog %r", self._name)
-                return self.async_create_entry(
-                    title=self._name,
-                    data={"name": self._name},
-                    options={
-                        "targets": _targets_from_device_ids(user_input["targets"]),
-                        "exclude": {},
-                        "zigbee2mqtt_group": user_input.get(
-                            "zigbee2mqtt_group", ""
-                        ).strip(),
-                        "notifications": {},
-                    },
+                targets, friendly_name, error = await _validated_target_options(
+                    self.hass, user_input["targets"]
                 )
+                if error is not None:
+                    errors["base"] = error
+                else:
+                    _LOGGER.info("Creating notification catalog %r", self._name)
+                    return self.async_create_entry(
+                        title=self._name,
+                        data={"name": self._name},
+                        options={
+                            "targets": targets,
+                            "exclude": {},
+                            "zigbee2mqtt_group": friendly_name,
+                            "notifications": {},
+                        },
+                    )
         return self.async_show_form(
             step_id="targets",
             data_schema=_targets_schema(self.hass),
@@ -527,11 +560,17 @@ class NotifyLightsOptionsFlow(OptionsFlow):
             if not _has_targets(user_input.get("targets")):
                 errors["base"] = "target_required"
             else:
-                return self._save(
-                    targets=_targets_from_device_ids(user_input["targets"]),
-                    exclude={},
-                    zigbee2mqtt_group=user_input.get("zigbee2mqtt_group", "").strip(),
+                targets, friendly_name, error = await _validated_target_options(
+                    self.hass, user_input["targets"]
                 )
+                if error is not None:
+                    errors["base"] = error
+                else:
+                    return self._save(
+                        targets=targets,
+                        exclude={},
+                        zigbee2mqtt_group=friendly_name,
+                    )
         return self.async_show_form(
             step_id="edit_targets",
             data_schema=_targets_schema(self.hass, self._options()),
