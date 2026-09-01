@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 
 from .active_set import ActiveEntry, compute_active_set
 from .adapter import AdapterRegistry
@@ -18,6 +19,9 @@ _LOGGER = logging.getLogger(__name__)
 
 # (Notification, pool_entry_id, activated_at)
 StackEntry = tuple[Notification, str, float]
+
+# HA light brightness scale. A ceiling of 255 applies no dimming.
+MAX_CEILING = 255
 
 
 @dataclass(frozen=True)
@@ -51,6 +55,14 @@ class NotifyLightsCoordinator:
         self._stacks: dict[str, list[StackEntry]] = {}
         self._warned_targets: set[str] = set()
         self._transport_groups: dict[str, list[TransportGroup]] = {}
+        # One config entry's own notifications, independent of physical
+        # targets. Powers each entry's group light entity: its brightness is
+        # a ceiling applied to every notification that entry activates, and
+        # its on/off/color/effect mirror whichever of its own notifications
+        # is currently top priority.
+        self._entry_active: dict[str, list[tuple[Notification, float]]] = {}
+        self._entry_listeners: dict[str, list[Callable[[], None]]] = {}
+        self._ceilings: dict[str, int] = {}
 
     def register_transport_groups(
         self, owner_id: str, groups: list[TransportGroup]
@@ -129,6 +141,7 @@ class NotifyLightsCoordinator:
                 if not (n.name == notification.name and pid == pool_entry_id)
             ]
             stack.append((notification, pool_entry_id, activated_at))
+        self._set_entry_notification(pool_entry_id, notification, activated_at)
         await self._render_targets(changed_targets)
 
     async def async_deactivate(
@@ -150,6 +163,7 @@ class NotifyLightsCoordinator:
                 for n, pid, t in stack
                 if not (n.name == notification.name and pid == pool_entry_id)
             ]
+        self._clear_entry_notification(pool_entry_id, notification)
         await self._render_targets(changed_targets)
 
     async def async_deactivate_entry(self, pool_entry_id: str) -> None:
@@ -161,6 +175,9 @@ class NotifyLightsCoordinator:
                 self._stacks[target] = kept
                 changed_targets.append(target)
 
+        self._entry_active.pop(pool_entry_id, None)
+        self._ceilings.pop(pool_entry_id, None)
+        self._entry_listeners.pop(pool_entry_id, None)
         _LOGGER.info(
             "Deactivated entry %s on %d targets",
             pool_entry_id,
@@ -168,16 +185,97 @@ class NotifyLightsCoordinator:
         )
         await self._render_targets(set(changed_targets))
 
-    def _active_set(self, stack_key: str) -> list[ActiveEntry]:
-        """Return the priority-resolved stack for one concrete target."""
-        return compute_active_set(
-            [
-                (notification, activated_at)
-                for notification, _pool_id, activated_at in self._stacks.get(
-                    stack_key, []
-                )
-            ]
+    def _set_entry_notification(
+        self, pool_entry_id: str, notification: Notification, activated_at: float
+    ) -> None:
+        """Track one entry's own active notification and notify listeners."""
+        entries = self._entry_active.setdefault(pool_entry_id, [])
+        entries[:] = [
+            (n, t) for n, t in entries if n.name != notification.name
+        ]
+        entries.append((notification, activated_at))
+        self._notify_entry_listeners(pool_entry_id)
+
+    def _clear_entry_notification(
+        self, pool_entry_id: str, notification: Notification
+    ) -> None:
+        """Stop tracking one entry's notification and notify listeners."""
+        entries = self._entry_active.get(pool_entry_id)
+        if entries is None:
+            return
+        entries[:] = [(n, t) for n, t in entries if n.name != notification.name]
+        self._notify_entry_listeners(pool_entry_id)
+
+    def _notify_entry_listeners(self, pool_entry_id: str) -> None:
+        for listener in list(self._entry_listeners.get(pool_entry_id, [])):
+            listener()
+
+    def entry_active_set(self, pool_entry_id: str) -> list[ActiveEntry]:
+        """Return one config entry's own notifications, priority-resolved."""
+        return compute_active_set(self._entry_active.get(pool_entry_id, []))
+
+    def async_add_entry_listener(
+        self, pool_entry_id: str, listener: Callable[[], None]
+    ) -> Callable[[], None]:
+        """Subscribe to changes in one entry's active notifications.
+
+        Returns an unsubscribe callable.
+        """
+        listeners = self._entry_listeners.setdefault(pool_entry_id, [])
+        listeners.append(listener)
+
+        def _unsubscribe() -> None:
+            if listener in listeners:
+                listeners.remove(listener)
+
+        return _unsubscribe
+
+    def get_ceiling(self, pool_entry_id: str) -> int:
+        """Return one entry's brightness ceiling (0-255, default full)."""
+        return self._ceilings.get(pool_entry_id, MAX_CEILING)
+
+    async def async_set_ceiling(self, pool_entry_id: str, ceiling: int) -> None:
+        """Set one entry's brightness ceiling and re-render its targets.
+
+        The ceiling scales every notification that entry activates, wherever
+        it renders -- this is what lets a group's light entity dim its
+        notifications without touching the notifications' own authored
+        brightness.
+        """
+        ceiling = max(0, min(MAX_CEILING, ceiling))
+        if self._ceilings.get(pool_entry_id, MAX_CEILING) == ceiling:
+            return
+        self._ceilings[pool_entry_id] = ceiling
+        affected = {
+            target
+            for target, stack in self._stacks.items()
+            if any(pid == pool_entry_id for _n, pid, _t in stack)
+        }
+        _LOGGER.info(
+            "Set ceiling for entry %s to %d, affecting %d target(s)",
+            pool_entry_id,
+            ceiling,
+            len(affected),
         )
+        await self._render_targets(affected)
+
+    def _active_set(self, stack_key: str) -> list[ActiveEntry]:
+        """Return the priority-resolved stack for one concrete target.
+
+        Each notification's authored brightness is scaled by its owning
+        entry's live ceiling before priority ordering. Ordering itself is
+        unaffected -- brightness plays no part in `_sort_key`.
+        """
+        scaled: list[tuple[Notification, float]] = []
+        for notification, pool_id, activated_at in self._stacks.get(stack_key, []):
+            ceiling = self._ceilings.get(pool_id, MAX_CEILING)
+            if ceiling != MAX_CEILING:
+                notification = replace(
+                    notification,
+                    brightness=round(notification.brightness * ceiling / MAX_CEILING),
+                )
+            scaled.append((notification, activated_at))
+        return compute_active_set(scaled)
 
     async def _render_targets(self, targets: set[str]) -> None:
         """Render changed targets, using native groups when their state agrees."""

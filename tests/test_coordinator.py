@@ -422,3 +422,198 @@ async def test_transport_group_falls_back_when_member_stacks_diverge():
 
     assert mock_adapter.render_group.await_count == 1
     assert mock_adapter.render.await_count == 2
+
+
+# --- brightness ceiling ------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ceiling_defaults_to_full():
+    hass, entity_reg, device_reg = _mock_hass_with_device()
+    coordinator = NotifyLightsCoordinator(
+        hass, AdapterRegistry(), entity_reg, device_reg
+    )
+    assert coordinator.get_ceiling(POOL_ID) == 255
+
+
+@pytest.mark.asyncio
+async def test_ceiling_scales_rendered_brightness():
+    hass, entity_reg, device_reg = _mock_hass_with_device()
+    registry = AdapterRegistry()
+    mock_adapter = _make_adapter()
+    registry.register(mock_adapter)
+    coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
+    notif = _make_notif()
+    assert notif.brightness == 100
+
+    await coordinator.async_activate(notif, TARGETS, POOL_ID)
+    await coordinator.async_set_ceiling(POOL_ID, 128)
+
+    active_set = mock_adapter.render.call_args[0][1]
+    assert active_set[0][0].brightness == round(100 * 128 / 255)
+
+
+@pytest.mark.asyncio
+async def test_ceiling_zero_mutes_brightness_without_removing_notification():
+    hass, entity_reg, device_reg = _mock_hass_with_device()
+    registry = AdapterRegistry()
+    mock_adapter = _make_adapter()
+    registry.register(mock_adapter)
+    coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
+    notif = _make_notif()
+
+    await coordinator.async_activate(notif, TARGETS, POOL_ID)
+    await coordinator.async_set_ceiling(POOL_ID, 0)
+
+    active_set = mock_adapter.render.call_args[0][1]
+    assert len(active_set) == 1
+    assert active_set[0][0].brightness == 0
+
+
+@pytest.mark.asyncio
+async def test_ceiling_only_affects_its_own_entry():
+    hass, entity_reg, device_reg = _mock_hass_with_device()
+    registry = AdapterRegistry()
+    mock_adapter = _make_adapter()
+    registry.register(mock_adapter)
+    coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
+    dimmed = _make_notif(name="dimmed", priority=10)
+    full = _make_notif(name="full", priority=90)
+
+    await coordinator.async_activate(dimmed, TARGETS, "pool_a")
+    await coordinator.async_activate(full, TARGETS, "pool_b")
+    await coordinator.async_set_ceiling("pool_a", 0)
+
+    active_set = mock_adapter.render.call_args[0][1]
+    by_name = {entry[0].name: entry[0].brightness for entry in active_set}
+    assert by_name["dimmed"] == 0
+    assert by_name["full"] == 100
+
+
+@pytest.mark.asyncio
+async def test_ceiling_does_not_rerender_unaffected_targets():
+    hass, entity_reg, device_reg = _mock_hass_with_device()
+    registry = AdapterRegistry()
+    mock_adapter = _make_adapter()
+    registry.register(mock_adapter)
+    coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
+
+    await coordinator.async_set_ceiling(POOL_ID, 50)
+
+    mock_adapter.render.assert_not_awaited()
+
+
+# --- entry active-set and listeners -------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_entry_active_set_is_empty_with_nothing_active():
+    hass, entity_reg, device_reg = _mock_hass_with_device()
+    coordinator = NotifyLightsCoordinator(
+        hass, AdapterRegistry(), entity_reg, device_reg
+    )
+    assert coordinator.entry_active_set(POOL_ID) == []
+
+
+@pytest.mark.asyncio
+async def test_entry_active_set_tracks_own_notifications_by_priority():
+    hass, entity_reg, device_reg = _mock_hass_with_device()
+    registry = AdapterRegistry()
+    registry.register(_make_adapter())
+    coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
+    low = _make_notif(name="low", priority=10)
+    high = _make_notif(name="high", priority=90)
+
+    await coordinator.async_activate(low, TARGETS, POOL_ID)
+    await coordinator.async_activate(high, TARGETS, POOL_ID)
+
+    active = coordinator.entry_active_set(POOL_ID)
+    assert [entry[0].name for entry in active] == ["high", "low"]
+
+
+@pytest.mark.asyncio
+async def test_entry_active_set_ignores_other_entries():
+    hass, entity_reg, device_reg = _mock_hass_with_device()
+    registry = AdapterRegistry()
+    registry.register(_make_adapter())
+    coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
+    mine = _make_notif(name="mine")
+    other = _make_notif(name="other")
+
+    await coordinator.async_activate(mine, TARGETS, "pool_a")
+    await coordinator.async_activate(other, TARGETS, "pool_b")
+
+    assert [e[0].name for e in coordinator.entry_active_set("pool_a")] == ["mine"]
+
+
+@pytest.mark.asyncio
+async def test_entry_active_set_drops_notification_on_deactivate():
+    hass, entity_reg, device_reg = _mock_hass_with_device()
+    registry = AdapterRegistry()
+    registry.register(_make_adapter())
+    coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
+    notif = _make_notif()
+
+    await coordinator.async_activate(notif, TARGETS, POOL_ID)
+    await coordinator.async_deactivate(notif, TARGETS, POOL_ID)
+
+    assert coordinator.entry_active_set(POOL_ID) == []
+
+
+@pytest.mark.asyncio
+async def test_entry_active_set_cleared_by_deactivate_entry():
+    hass, entity_reg, device_reg = _mock_hass_with_device()
+    registry = AdapterRegistry()
+    registry.register(_make_adapter())
+    coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
+    notif = _make_notif()
+
+    await coordinator.async_activate(notif, TARGETS, POOL_ID)
+    await coordinator.async_deactivate_entry(POOL_ID)
+
+    assert coordinator.entry_active_set(POOL_ID) == []
+
+
+@pytest.mark.asyncio
+async def test_entry_listener_fires_on_activate_and_deactivate():
+    hass, entity_reg, device_reg = _mock_hass_with_device()
+    registry = AdapterRegistry()
+    registry.register(_make_adapter())
+    coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
+    calls = []
+    coordinator.async_add_entry_listener(POOL_ID, lambda: calls.append(1))
+    notif = _make_notif()
+
+    await coordinator.async_activate(notif, TARGETS, POOL_ID)
+    await coordinator.async_deactivate(notif, TARGETS, POOL_ID)
+
+    assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_entry_listener_unsubscribe_stops_further_calls():
+    hass, entity_reg, device_reg = _mock_hass_with_device()
+    registry = AdapterRegistry()
+    registry.register(_make_adapter())
+    coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
+    calls = []
+    unsubscribe = coordinator.async_add_entry_listener(POOL_ID, lambda: calls.append(1))
+    unsubscribe()
+
+    await coordinator.async_activate(_make_notif(), TARGETS, POOL_ID)
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_entry_listener_not_called_for_other_entries():
+    hass, entity_reg, device_reg = _mock_hass_with_device()
+    registry = AdapterRegistry()
+    registry.register(_make_adapter())
+    coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
+    calls = []
+    coordinator.async_add_entry_listener("pool_a", lambda: calls.append(1))
+
+    await coordinator.async_activate(_make_notif(), TARGETS, "pool_b")
+
+    assert calls == []
