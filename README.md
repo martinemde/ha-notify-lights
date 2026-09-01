@@ -7,33 +7,32 @@ smart switches.
 
 Notify Lights has two user-facing concepts.
 
-### A catalog is a light group
+### A catalog is a device group
 
-Each Notify Lights device (config entry) is itself one light group: it has a
-name and one fixed target set, chosen when you create it and editable
-afterward from its device page under **Edit targets**. Every notification
-rule inside a catalog shares that same target set — there is nothing to
-route per rule. Areas that should light up differently get their own
-catalog, for example:
+Each Notify Lights device (config entry) has a name and one fixed set of
+physical Inovelli devices, chosen when you create it and editable afterward
+from its device page under **Edit Inovelli devices**. Every notification rule
+inside a catalog shares that same device set — there is nothing to route per
+rule. Areas that should light up differently get their own catalog, for
+example:
 
 - **Common alerts** — most switches, excluding the kids’ rooms
 - **Near garage** — Great Room Entry Lights and Great Room Ceiling Lights
 - **Bedrooms HVAC** / **Living HVAC** — the non-kid-bedroom switches in each zone
 - **Outside office** and **Outside bathroom** — one nearby switch each
 
-A catalog's targets accept Home Assistant entities, devices, and areas. Its
-**Except** field subtracts entities, devices, or areas, making “the whole house
-except the kids’ rooms” a first-class configuration rather than a copied list.
-
-Editing a catalog's targets under **Edit targets** updates every notification
-rule inside it immediately.
+The picker lists only physical Inovelli devices backed by Zigbee2MQTT. Older
+catalogs that targeted light entities, areas, or group lights are expanded to
+their physical members when opened; saving the form stores those device IDs.
+Editing the device set updates every notification rule inside the catalog
+immediately.
 
 If the same switches belong to a Zigbee2MQTT group, enter that group's friendly
 name in **Zigbee2MQTT group** (for example, `notify/security`). Notify Lights
 then sends one native Zigbee groupcast whenever every member needs the same LED
 layout. If another notification makes member layouts differ, it automatically
-falls back to rendering those switches individually. The Home Assistant target
-selection and Zigbee2MQTT group membership must describe the same switches.
+falls back to rendering those switches individually. The selected Inovelli
+devices and Zigbee2MQTT group membership must describe the same switches.
 
 ### Notification rules answer “when and what?”
 
@@ -57,14 +56,15 @@ available), while still allowing a custom value.
 
 Each rule chooses its color/effect/brightness/priority. Coverage is an
 explicit choice between the full light bar and a one-pixel bottom indicator.
-Where it shows is decided once, for the whole catalog, under **Edit targets**.
+Where it shows is decided once, for the whole catalog, under **Edit Inovelli
+devices**.
 
 ## Tesla example
 
-Create a **Near garage** catalog targeting:
+Create a **Near garage** catalog with these Inovelli devices:
 
-- light.great_room_entry_lights_2
-- light.great_room_ceiling_lights
+- Great Room Entry Lights
+- Great Room Ceiling Lights
 
 Then add two rules inside it:
 
@@ -185,11 +185,24 @@ Automatic rules need no calling automation. Their binary sensors expose the
 source, matching state, duration, priority, and resolved physical targets as
 attributes.
 
+## Upgrading to 0.9.1
+
+The target form now selects physical Inovelli devices instead of Home
+Assistant light entities. Opening **Edit Inovelli devices** expands existing
+entity, area, exclusion, and group-light selectors to the physical devices
+they currently resolve to. Saving replaces those legacy selectors with the
+selected device IDs; no startup migration or entity IDs change.
+
+The optional Zigbee2MQTT group remains separate because it is a transport
+optimization: it sends one native groupcast when every selected device needs
+the same LED layout, with automatic per-device fallback when their stacks
+diverge.
+
 ## Upgrading to 0.9.0
 
 Entries migrate automatically to config version 4, which makes every catalog
-a light group with one fixed target set (see "A catalog is a light group"
-above) and adds each catalog's brightness light entity.
+a device group with one fixed target set and adds each catalog's brightness
+light entity.
 
 - The migration unions every notification's own targets and every reusable
   group it referenced (including groups that had a Zigbee2MQTT group set)
@@ -197,7 +210,7 @@ above) and adds each catalog's brightness light entity.
   group** fields. Nothing is dropped, but nothing is silently split either.
 - If a catalog previously routed different notifications to different areas,
   it now targets the union of all of them. Split it into one catalog per
-  area afterward, using **Edit targets** on the new catalog and each
+  area afterward, using **Edit Inovelli devices** on the new catalog and each
   original notification's targets as a guide.
 - If a catalog referenced more than one reusable group with *different*
   Zigbee2MQTT groups set, the migrated catalog's Zigbee2MQTT group is left

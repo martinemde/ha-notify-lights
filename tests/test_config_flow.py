@@ -1,22 +1,24 @@
-"""Tests for the Notify Lights v4 config and options flows.
+"""Tests for the Notify Lights config and options flows.
 
-A catalog is created with a name and one fixed target set (its light group),
-editable afterward under "Edit targets". Every notification rule inside it
-shares that target set -- there is nothing to route per rule.
+A catalog is created with a name and one fixed set of physical Inovelli
+devices, editable afterward under "Edit Inovelli devices". Every notification
+rule inside it shares that device set -- there is nothing to route per rule.
 """
 
-from unittest.mock import MagicMock
+import json
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from custom_components.notify_lights.config_flow import (
     NotifyLightsConfigFlow,
     NotifyLightsOptionsFlow,
+    _device_ids_from_options,
 )
 
-TARGETS = {
-    "entity_id": ["light.great_room_entry_lights", "light.great_room_ceiling_lights"]
-}
+DEVICE_IDS = ["device-ceiling", "device-entry"]
+TARGETS = {"device_id": DEVICE_IDS}
 
 
 def _flow(options=None):
@@ -71,8 +73,7 @@ async def test_targets_step_creates_v4_catalog_with_its_target_set():
 
     result = await flow.async_step_targets(
         {
-            "targets": TARGETS,
-            "exclude": {},
+            "targets": DEVICE_IDS,
             "zigbee2mqtt_group": "notify/near_garage",
         }
     )
@@ -94,7 +95,7 @@ async def test_targets_step_requires_at_least_one_target():
     flow.hass = MagicMock()
     await flow.async_step_user(user_input={"name": "Home Notifications"})
 
-    result = await flow.async_step_targets({"targets": {}, "exclude": {}})
+    result = await flow.async_step_targets({"targets": []})
 
     assert result["type"] == "form"
     assert result["errors"]["base"] == "target_required"
@@ -139,6 +140,54 @@ async def test_options_menu_omits_notification_editing_when_empty():
     assert result["menu_options"] == ["edit_targets", "add_notification"]
 
 
+def test_options_menu_translations_cover_every_emitted_option():
+    """A missing menu translation renders as an empty row in Home Assistant."""
+    strings = json.loads(
+        (Path(__file__).parents[1] / "custom_components/notify_lights/strings.json")
+        .read_text()
+    )
+    menu_options = strings["options"]["step"]["init"]["menu_options"]
+
+    assert menu_options == {
+        "edit_targets": "Edit Inovelli devices",
+        "add_notification": "Add notification rule",
+        "modify_notification": "Edit notification rule",
+        "delete_notification": "Delete notification rule",
+    }
+
+
+def test_existing_entity_targets_are_presented_as_physical_devices():
+    hass = MagicMock()
+    entity_registry = MagicMock()
+    device_registry = MagicMock()
+    entry = MagicMock()
+    entry.device_id = "inovelli-device"
+    entity_registry.async_get.return_value = entry
+    device = MagicMock()
+    device.id = "inovelli-device"
+    device.manufacturer = "Inovelli"
+    device.model = "2-in-1 switch + dimmer"
+    device_registry.async_get.return_value = device
+
+    with (
+        patch(
+            "custom_components.notify_lights.config_flow.resolve_entry_targets",
+            return_value=["light.inovelli"],
+        ),
+        patch(
+            "custom_components.notify_lights.config_flow.er.async_get",
+            return_value=entity_registry,
+        ),
+        patch(
+            "custom_components.notify_lights.config_flow.dr.async_get",
+            return_value=device_registry,
+        ),
+    ):
+        assert _device_ids_from_options(
+            hass, {"targets": {"entity_id": ["light.inovelli"]}}
+        ) == ["inovelli-device"]
+
+
 # --- editing a catalog's targets -----------------------------------------
 
 
@@ -147,20 +196,20 @@ async def test_edit_targets_saves_the_new_target_set():
     flow = _flow()
     result = await flow.async_step_edit_targets(
         {
-            "targets": {"entity_id": ["light.new"]},
-            "exclude": {},
+            "targets": ["device-new"],
             "zigbee2mqtt_group": "notify/updated",
         }
     )
     assert result["type"] == "create_entry"
-    assert result["data"]["targets"] == {"entity_id": ["light.new"]}
+    assert result["data"]["targets"] == {"device_id": ["device-new"]}
+    assert result["data"]["exclude"] == {}
     assert result["data"]["zigbee2mqtt_group"] == "notify/updated"
 
 
 @pytest.mark.asyncio
 async def test_edit_targets_requires_at_least_one_target():
     flow = _flow()
-    result = await flow.async_step_edit_targets({"targets": {}, "exclude": {}})
+    result = await flow.async_step_edit_targets({"targets": []})
     assert result["type"] == "form"
     assert result["errors"]["base"] == "target_required"
 

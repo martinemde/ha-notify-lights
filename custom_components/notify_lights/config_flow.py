@@ -1,10 +1,9 @@
 """Config and options flows for Notify Lights.
 
-A catalog (config entry) is itself a light group: it has one fixed target
-set, set once when the catalog is created and editable afterward under
-"Edit targets". Every notification rule inside it shares that target set --
-there is nothing to route per rule. Areas that should light up differently
-get their own catalog.
+A catalog (config entry) has one fixed set of physical Inovelli devices,
+chosen when the catalog is created and editable afterward under "Edit
+Inovelli devices". Every notification rule inside it shares that device set --
+there is nothing to route per rule.
 
 Activation is selected explicitly. Duration is never used as a hidden type
 switch in the UI, even though the compact stored/runtime model still represents
@@ -16,13 +15,20 @@ from __future__ import annotations
 import logging
 import re
 from copy import deepcopy
+from fnmatch import fnmatch
 from typing import Any
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
 from homeassistant.core import callback
-from homeassistant.helpers import selector
+from homeassistant.helpers import (
+    device_registry as dr,
+    entity_registry as er,
+    selector,
+)
 
+from . import resolve_entry_targets
+from .adapters.inovelli_blue_z2m import InovelliBlueZ2MAdapter
 from .const import (
     DEFAULT_BRIGHTNESS,
     DEFAULT_PRIORITY,
@@ -79,8 +85,11 @@ DISPLAY_MODE_OPTIONS = [
 ]
 SOURCE_STATE = "__state__"
 
-TARGET_ENTITY_FILTER = selector.EntityFilterSelectorConfig(
-    domain=["light", "switch"],
+TARGET_DEVICE_ENTITY_FILTER = selector.EntityFilterSelectorConfig(
+    domain=["light", "switch"], integration="mqtt"
+)
+INOVELLI_DEVICE_FILTER = selector.DeviceFilterSelectorConfig(
+    manufacturer=InovelliBlueZ2MAdapter.manufacturer
 )
 
 
@@ -89,11 +98,47 @@ def _slugify(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
 
 
-def _target_selector() -> selector.TargetSelector:
-    """Accept any mix of light/switch entities, devices, and areas."""
-    return selector.TargetSelector(
-        selector.TargetSelectorConfig(entity=[TARGET_ENTITY_FILTER])
+def _device_selector() -> selector.DeviceSelector:
+    """Select physical Inovelli devices backed by Zigbee2MQTT entities."""
+    return selector.DeviceSelector(
+        selector.DeviceSelectorConfig(
+            multiple=True,
+            entity=[TARGET_DEVICE_ENTITY_FILTER],
+            filter=[INOVELLI_DEVICE_FILTER],
+        )
     )
+
+
+def _device_ids_from_options(hass, options: dict[str, Any]) -> list[str]:
+    """Present legacy entity/group targets as their physical Inovelli devices."""
+    resolved_entities = resolve_entry_targets(hass, options)
+    if not resolved_entities:
+        return []
+
+    entity_registry = er.async_get(hass)
+    device_registry = dr.async_get(hass)
+    device_ids: set[str] = set()
+    for entity_id in resolved_entities:
+        entity = entity_registry.async_get(entity_id)
+        if entity is None or entity.device_id is None:
+            continue
+        device = device_registry.async_get(entity.device_id)
+        if device is None:
+            continue
+        if device.manufacturer != InovelliBlueZ2MAdapter.manufacturer:
+            continue
+        if not any(
+            fnmatch(device.model or "", pattern)
+            for pattern in InovelliBlueZ2MAdapter.model_patterns
+        ):
+            continue
+        device_ids.add(device.id)
+    return sorted(device_ids)
+
+
+def _targets_from_device_ids(device_ids: list[str]) -> dict[str, list[str]]:
+    """Store device-selector values in the target structure used at runtime."""
+    return {"device_id": sorted(set(device_ids))}
 
 
 def _activation_for_config(config: dict[str, Any]) -> Activation:
@@ -150,22 +195,21 @@ def _description_field(current: dict[str, Any]) -> tuple[Any, Any]:
     )
 
 
-def _targets_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
-    """Build the catalog-wide target selection form.
+def _targets_schema(hass, defaults: dict[str, Any] | None = None) -> vol.Schema:
+    """Build the catalog-wide Inovelli device selection form.
 
-    Every notification rule in this catalog shares this target set. If the
-    same switches also belong to a Zigbee2MQTT group, naming it here lets
-    Notify Lights send one native groupcast instead of one command per switch.
+    Existing entity, area, and group-light targets are expanded to physical
+    devices for display. Saving the form replaces that legacy selector with
+    explicit device IDs. If the same devices also belong to a Zigbee2MQTT
+    group, naming it here lets Notify Lights send one native groupcast instead
+    of one command per switch.
     """
     current = defaults or {}
     return vol.Schema(
         {
             vol.Required(
-                "targets", default=current.get("targets", {})
-            ): _target_selector(),
-            vol.Optional(
-                "exclude", default=current.get("exclude", {})
-            ): _target_selector(),
+                "targets", default=_device_ids_from_options(hass, current)
+            ): _device_selector(),
             vol.Optional(
                 "zigbee2mqtt_group",
                 default=current.get("zigbee2mqtt_group", ""),
@@ -417,8 +461,8 @@ class NotifyLightsConfigFlow(ConfigFlow, domain=DOMAIN):
                     title=self._name,
                     data={"name": self._name},
                     options={
-                        "targets": user_input["targets"],
-                        "exclude": user_input.get("exclude", {}),
+                        "targets": _targets_from_device_ids(user_input["targets"]),
+                        "exclude": {},
                         "zigbee2mqtt_group": user_input.get(
                             "zigbee2mqtt_group", ""
                         ).strip(),
@@ -427,7 +471,7 @@ class NotifyLightsConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
         return self.async_show_form(
             step_id="targets",
-            data_schema=_targets_schema(),
+            data_schema=_targets_schema(self.hass),
             errors=errors,
         )
 
@@ -484,13 +528,13 @@ class NotifyLightsOptionsFlow(OptionsFlow):
                 errors["base"] = "target_required"
             else:
                 return self._save(
-                    targets=user_input["targets"],
-                    exclude=user_input.get("exclude", {}),
+                    targets=_targets_from_device_ids(user_input["targets"]),
+                    exclude={},
                     zigbee2mqtt_group=user_input.get("zigbee2mqtt_group", "").strip(),
                 )
         return self.async_show_form(
             step_id="edit_targets",
-            data_schema=_targets_schema(self._options()),
+            data_schema=_targets_schema(self.hass, self._options()),
             errors=errors,
         )
 

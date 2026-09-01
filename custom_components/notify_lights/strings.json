@@ -3,9 +3,17 @@
     "step": {
       "user": {
         "title": "Create Notification Catalog",
-        "description": "A catalog holds reusable light groups and notification rules.",
+        "description": "A catalog sends all of its notification rules to one fixed set of Inovelli devices.",
         "data": {
           "name": "Catalog name"
+        }
+      },
+      "targets": {
+        "title": "Choose Inovelli Devices",
+        "description": "Select the physical Inovelli switches whose LED bars should show this catalog. If these exact devices also belong to a Zigbee2MQTT group, enter that group's friendly name to use native Zigbee groupcasts.",
+        "data": {
+          "targets": "Inovelli devices",
+          "zigbee2mqtt_group": "Zigbee2MQTT group (optional)"
         }
       }
     }
@@ -14,48 +22,20 @@
     "step": {
       "init": {
         "title": "Notify Lights",
-        "description": "Light groups answer **where** a notification appears. Notification rules answer **when** it appears and **what** it looks like.",
+        "description": "The Inovelli devices answer **where** a notification appears. Notification rules answer **when** it appears and **what** it looks like.",
         "menu_options": {
-          "add_group": "Add light group",
-          "modify_group": "Edit light group",
-          "delete_group": "Delete light group",
+          "edit_targets": "Edit Inovelli devices",
           "add_notification": "Add notification rule",
           "modify_notification": "Edit notification rule",
           "delete_notification": "Delete notification rule"
         }
       },
-      "add_group": {
-        "title": "Add Light Group",
-        "description": "Create a reusable destination such as “Common alerts,” “Near garage,” or “Outside office.” Areas and Home Assistant light groups are supported. Use Except for patterns such as the whole house except kids’ rooms. If the same switches are also in a Zigbee2MQTT group, enter its friendly name to send one reliable groupcast instead of many device commands.",
+      "edit_targets": {
+        "title": "Edit Inovelli Devices",
+        "description": "Changing these devices updates every notification rule in this catalog. Existing group-light selections are expanded into their physical Inovelli members. A Zigbee2MQTT group must contain exactly the same devices selected here.",
         "data": {
-          "name": "Group name",
-          "description": "What this group covers",
-          "targets": "Lights, devices, or areas",
-          "exclude": "Except",
+          "targets": "Inovelli devices",
           "zigbee2mqtt_group": "Zigbee2MQTT group (optional)"
-        }
-      },
-      "modify_group": {
-        "title": "Edit Light Group",
-        "data": {
-          "slug": "Light group"
-        }
-      },
-      "modify_group_form": {
-        "title": "Edit Light Group",
-        "description": "Changing this group updates every notification rule that uses it. A Zigbee2MQTT group must contain exactly the same switches selected here.",
-        "data": {
-          "name": "Group name",
-          "description": "What this group covers",
-          "targets": "Lights, devices, or areas",
-          "exclude": "Except",
-          "zigbee2mqtt_group": "Zigbee2MQTT group (optional)"
-        }
-      },
-      "delete_group": {
-        "title": "Delete Light Group",
-        "data": {
-          "slug": "Light group"
         }
       },
       "add_notification": {
@@ -97,12 +77,9 @@
         }
       },
       "notification_details": {
-        "title": "Route and Style the Notification",
-        "description": "Choose reusable light groups, optional extra lights, and the LED appearance. Higher-priority notifications win when several are active on the same switch. Priority 30 or lower always has a one-pixel footprint in the stack, regardless of the selected coverage.",
+        "title": "Style the Notification",
+        "description": "Choose the LED appearance. Higher-priority notifications win when several are active on the same switch. Priority 30 or lower always has a one-pixel footprint in the stack, regardless of the selected coverage.",
         "data": {
-          "groups": "Light groups",
-          "targets": "Additional lights, devices, or areas",
-          "exclude": "Except",
           "active_state": "Source state",
           "duration": "Show for (seconds)",
           "color": "Color",
@@ -123,8 +100,7 @@
     "error": {
       "name_exists": "A record with this name already exists.",
       "invalid_name": "Enter a name containing at least one letter or number.",
-      "target_required": "Choose at least one light group or additional target.",
-      "group_in_use": "This light group is used by a notification rule. Edit that rule before deleting the group."
+      "target_required": "Choose at least one Inovelli device."
     }
   }
 }
