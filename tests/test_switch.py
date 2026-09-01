@@ -17,9 +17,14 @@ def _make_entry(entry_id=ENTRY_ID, name="Test Pool"):
 
 def _make_notif(name="test_alert", display_name="Test Alert"):
     return Notification(
-        name=name, display_name=display_name, color=0, brightness=100,
-        effect=Effect.SOLID, effect_speed=Speed.MEDIUM,
-        duration=0, priority=50,
+        name=name,
+        display_name=display_name,
+        color=0,
+        brightness=100,
+        effect=Effect.SOLID,
+        effect_speed=Speed.MEDIUM,
+        duration=0,
+        priority=50,
     )
 
 
@@ -104,8 +109,14 @@ def test_initial_state_is_off():
 def test_extra_state_attributes_expose_meaning_and_targets():
     coordinator = AsyncMock()
     notif = Notification(
-        name="fridge_ajar", display_name="Fridge Ajar", color=0, brightness=100,
-        effect=Effect.PULSE, effect_speed=Speed.MEDIUM, duration=0, priority=75,
+        name="fridge_ajar",
+        display_name="Fridge Ajar",
+        color=0,
+        brightness=100,
+        effect=Effect.PULSE,
+        effect_speed=Speed.MEDIUM,
+        duration=0,
+        priority=75,
         description="A fridge has not cycled off.",
     )
     switch = NotificationSwitch(coordinator, notif, TARGETS, _make_entry())
@@ -122,14 +133,18 @@ async def test_setup_entry_gives_each_switch_its_own_targets():
     from custom_components.notify_lights.const import DOMAIN
 
     hass = MagicMock()
-    hass.data = {DOMAIN: {ENTRY_ID: {
-        "coordinator": AsyncMock(),
-        "notifications": {
-            "alpha": _make_notif("alpha", "Alpha"),
-            "beta": _make_notif("beta", "Beta"),
-        },
-        "targets": {"alpha": ["light.a"], "beta": ["light.b"]},
-    }}}
+    hass.data = {
+        DOMAIN: {
+            ENTRY_ID: {
+                "coordinator": AsyncMock(),
+                "notifications": {
+                    "alpha": _make_notif("alpha", "Alpha"),
+                    "beta": _make_notif("beta", "Beta"),
+                },
+                "targets": {"alpha": ["light.a"], "beta": ["light.b"]},
+            }
+        }
+    }
 
     added = []
     await switch_mod.async_setup_entry(
@@ -147,11 +162,15 @@ async def test_setup_entry_tolerates_notification_without_targets():
     from custom_components.notify_lights.const import DOMAIN
 
     hass = MagicMock()
-    hass.data = {DOMAIN: {ENTRY_ID: {
-        "coordinator": AsyncMock(),
-        "notifications": {"alpha": _make_notif("alpha", "Alpha")},
-        "targets": {},
-    }}}
+    hass.data = {
+        DOMAIN: {
+            ENTRY_ID: {
+                "coordinator": AsyncMock(),
+                "notifications": {"alpha": _make_notif("alpha", "Alpha")},
+                "targets": {},
+            }
+        }
+    }
 
     added = []
     await switch_mod.async_setup_entry(

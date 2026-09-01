@@ -1,4 +1,5 @@
 """End-to-end smoke tests for the pool-based Notify Lights architecture."""
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -66,9 +67,14 @@ async def test_switch_round_trip():
     coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
 
     notif = Notification(
-        name="heating", display_name="Heating", color=120, brightness=80,
-        effect=Effect.PULSE, effect_speed=Speed.FAST,
-        duration=0, priority=50,
+        name="heating",
+        display_name="Heating",
+        color=120,
+        brightness=80,
+        effect=Effect.PULSE,
+        effect_speed=Speed.FAST,
+        duration=0,
+        priority=50,
     )
 
     entry = _make_entry(POOL_A)
@@ -102,10 +108,14 @@ async def test_button_activates_and_schedules_deactivation():
     coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
 
     notif = Notification(
-        name="doorbell_flash", display_name="Doorbell Flash",
-        color=0, brightness=100,
-        effect=Effect.BLINK, effect_speed=Speed.FAST,
-        duration=5, priority=90,
+        name="doorbell_flash",
+        display_name="Doorbell Flash",
+        color=0,
+        brightness=100,
+        effect=Effect.BLINK,
+        effect_speed=Speed.FAST,
+        duration=5,
+        priority=90,
     )
 
     targets = ["light.kitchen_switch"]
@@ -120,7 +130,10 @@ async def test_button_activates_and_schedules_deactivation():
     entry = _make_entry(POOL_A)
     button = NotificationButton(coordinator, notif, targets, entry, hass)
 
-    with patch("custom_components.notify_lights.button.async_call_later", side_effect=fake_call_later):
+    with patch(
+        "custom_components.notify_lights.button.async_call_later",
+        side_effect=fake_call_later,
+    ):
         await button.async_press()
 
     assert len(adapter.render_calls) == 1
@@ -148,16 +161,24 @@ async def test_cross_pool_priority_on_shared_switch():
     coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
 
     low = Notification(
-        name="background", display_name="Background",
-        color=120, brightness=50,
-        effect=Effect.SOLID, effect_speed=Speed.MEDIUM,
-        duration=0, priority=10,
+        name="background",
+        display_name="Background",
+        color=120,
+        brightness=50,
+        effect=Effect.SOLID,
+        effect_speed=Speed.MEDIUM,
+        duration=0,
+        priority=10,
     )
     high = Notification(
-        name="urgent_alert", display_name="Urgent Alert",
-        color=0, brightness=100,
-        effect=Effect.BLINK, effect_speed=Speed.FAST,
-        duration=0, priority=90,
+        name="urgent_alert",
+        display_name="Urgent Alert",
+        color=0,
+        brightness=100,
+        effect=Effect.BLINK,
+        effect_speed=Speed.FAST,
+        duration=0,
+        priority=90,
     )
 
     entry_a = _make_entry(POOL_A)
@@ -190,10 +211,14 @@ async def test_same_notification_different_pools_independent():
     coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
 
     notif = Notification(
-        name="heating", display_name="Heating",
-        color=120, brightness=80,
-        effect=Effect.SOLID, effect_speed=Speed.MEDIUM,
-        duration=0, priority=50,
+        name="heating",
+        display_name="Heating",
+        color=120,
+        brightness=80,
+        effect=Effect.SOLID,
+        effect_speed=Speed.MEDIUM,
+        duration=0,
+        priority=50,
     )
 
     entry_a = _make_entry(POOL_A)

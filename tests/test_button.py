@@ -17,9 +17,14 @@ def _make_entry(entry_id=ENTRY_ID, name="Test Pool"):
 
 def _make_notif(name="flash_alert", display_name="Flash Alert", duration=10):
     return Notification(
-        name=name, display_name=display_name, color=0, brightness=100,
-        effect=Effect.BLINK, effect_speed=Speed.FAST,
-        duration=duration, priority=50,
+        name=name,
+        display_name=display_name,
+        color=0,
+        brightness=100,
+        effect=Effect.BLINK,
+        effect_speed=Speed.FAST,
+        duration=duration,
+        priority=50,
     )
 
 
@@ -58,7 +63,10 @@ async def test_press_schedules_deactivation():
     entry = _make_entry()
     button = NotificationButton(coordinator, notif, TARGETS, entry, hass)
 
-    with patch("custom_components.notify_lights.button.async_call_later", return_value=cancel_callback) as mock_call_later:
+    with patch(
+        "custom_components.notify_lights.button.async_call_later",
+        return_value=cancel_callback,
+    ) as mock_call_later:
         await button.async_press()
         mock_call_later.assert_called_once()
         assert mock_call_later.call_args[0][1] == 5
@@ -75,7 +83,10 @@ async def test_second_press_cancels_previous_timer():
     entry = _make_entry()
     button = NotificationButton(coordinator, notif, TARGETS, entry, hass)
 
-    with patch("custom_components.notify_lights.button.async_call_later", side_effect=[cancel1, cancel2]):
+    with patch(
+        "custom_components.notify_lights.button.async_call_later",
+        side_effect=[cancel1, cancel2],
+    ):
         await button.async_press()
         await button.async_press()
 

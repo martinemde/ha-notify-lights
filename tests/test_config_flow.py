@@ -1,4 +1,9 @@
-"""Tests for the Notify Lights v3 options flow."""
+"""Tests for the Notify Lights v4 config and options flows.
+
+A catalog is created with a name and one fixed target set (its light group),
+editable afterward under "Edit targets". Every notification rule inside it
+shares that target set -- there is nothing to route per rule.
+"""
 
 from unittest.mock import MagicMock
 
@@ -9,10 +14,14 @@ from custom_components.notify_lights.config_flow import (
     NotifyLightsOptionsFlow,
 )
 
+TARGETS = {
+    "entity_id": ["light.great_room_entry_lights", "light.great_room_ceiling_lights"]
+}
+
 
 def _flow(options=None):
     entry = MagicMock()
-    entry.options = options or {"groups": {}, "notifications": {}}
+    entry.options = options or {"targets": TARGETS, "notifications": {}}
     flow = NotifyLightsOptionsFlow()
     flow.config_entry = entry
     flow.hass = MagicMock()
@@ -22,9 +31,6 @@ def _flow(options=None):
 
 def _details(**overrides):
     data = {
-        "groups": ["near_garage"],
-        "targets": {},
-        "exclude": {},
         "color": "green",
         "effect": "pulse",
         "effect_speed": "medium",
@@ -34,6 +40,9 @@ def _details(**overrides):
     }
     data.update(overrides)
     return data
+
+
+# --- creating a catalog ------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -46,14 +55,49 @@ async def test_user_step_shows_form():
 
 
 @pytest.mark.asyncio
-async def test_user_step_creates_empty_v3_catalog():
+async def test_user_step_advances_to_targets():
     flow = NotifyLightsConfigFlow()
     flow.hass = MagicMock()
     result = await flow.async_step_user(user_input={"name": "Home Notifications"})
+    assert result["type"] == "form"
+    assert result["step_id"] == "targets"
+
+
+@pytest.mark.asyncio
+async def test_targets_step_creates_v4_catalog_with_its_target_set():
+    flow = NotifyLightsConfigFlow()
+    flow.hass = MagicMock()
+    await flow.async_step_user(user_input={"name": "Home Notifications"})
+
+    result = await flow.async_step_targets(
+        {
+            "targets": TARGETS,
+            "exclude": {},
+            "zigbee2mqtt_group": "notify/near_garage",
+        }
+    )
+
     assert result["type"] == "create_entry"
     assert result["title"] == "Home Notifications"
     assert result["data"] == {"name": "Home Notifications"}
-    assert result["options"] == {"groups": {}, "notifications": {}}
+    assert result["options"] == {
+        "targets": TARGETS,
+        "exclude": {},
+        "zigbee2mqtt_group": "notify/near_garage",
+        "notifications": {},
+    }
+
+
+@pytest.mark.asyncio
+async def test_targets_step_requires_at_least_one_target():
+    flow = NotifyLightsConfigFlow()
+    flow.hass = MagicMock()
+    await flow.async_step_user(user_input={"name": "Home Notifications"})
+
+    result = await flow.async_step_targets({"targets": {}, "exclude": {}})
+
+    assert result["type"] == "form"
+    assert result["errors"]["base"] == "target_required"
 
 
 def test_options_flow_factory_uses_current_no_argument_api():
@@ -62,16 +106,14 @@ def test_options_flow_factory_uses_current_no_argument_api():
     assert isinstance(flow, NotifyLightsOptionsFlow)
 
 
+# --- options menu --------------------------------------------------------
+
+
 @pytest.mark.asyncio
-async def test_options_menu_separates_groups_and_notification_rules():
+async def test_options_menu_offers_targets_and_notification_rules():
     flow = _flow(
         {
-            "groups": {
-                "near_garage": {
-                    "slug": "near_garage",
-                    "display_name": "Near garage",
-                }
-            },
+            "targets": TARGETS,
             "notifications": {
                 "tesla_charging": {
                     "slug": "tesla_charging",
@@ -83,9 +125,7 @@ async def test_options_menu_separates_groups_and_notification_rules():
     result = await flow.async_step_init()
     assert result["type"] == "menu"
     assert result["menu_options"] == [
-        "add_group",
-        "modify_group",
-        "delete_group",
+        "edit_targets",
         "add_notification",
         "modify_notification",
         "delete_notification",
@@ -93,44 +133,44 @@ async def test_options_menu_separates_groups_and_notification_rules():
 
 
 @pytest.mark.asyncio
-async def test_add_group_saves_reusable_targets():
+async def test_options_menu_omits_notification_editing_when_empty():
+    flow = _flow({"targets": TARGETS, "notifications": {}})
+    result = await flow.async_step_init()
+    assert result["menu_options"] == ["edit_targets", "add_notification"]
+
+
+# --- editing a catalog's targets -----------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_edit_targets_saves_the_new_target_set():
     flow = _flow()
-    result = await flow.async_step_add_group(
+    result = await flow.async_step_edit_targets(
         {
-            "name": "Near garage",
-            "description": "Entry lights beside the garage",
-            "targets": {
-                "entity_id": [
-                    "light.great_room_entry_lights",
-                    "light.great_room_ceiling_lights",
-                ]
-            },
+            "targets": {"entity_id": ["light.new"]},
             "exclude": {},
-            "zigbee2mqtt_group": "notify/near_garage",
+            "zigbee2mqtt_group": "notify/updated",
         }
     )
     assert result["type"] == "create_entry"
-    group = result["data"]["groups"]["near_garage"]
-    assert group["targets"]["entity_id"] == [
-        "light.great_room_entry_lights",
-        "light.great_room_ceiling_lights",
-    ]
-    assert group["zigbee2mqtt_group"] == "notify/near_garage"
+    assert result["data"]["targets"] == {"entity_id": ["light.new"]}
+    assert result["data"]["zigbee2mqtt_group"] == "notify/updated"
+
+
+@pytest.mark.asyncio
+async def test_edit_targets_requires_at_least_one_target():
+    flow = _flow()
+    result = await flow.async_step_edit_targets({"targets": {}, "exclude": {}})
+    assert result["type"] == "form"
+    assert result["errors"]["base"] == "target_required"
+
+
+# --- notification rules ---------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_tesla_charging_rule_follows_source_state():
-    flow = _flow(
-        {
-            "groups": {
-                "near_garage": {
-                    "slug": "near_garage",
-                    "display_name": "Near garage",
-                }
-            },
-            "notifications": {},
-        }
-    )
+    flow = _flow()
     result = await flow.async_step_add_notification(
         {
             "name": "Tesla charging",
@@ -157,22 +197,13 @@ async def test_tesla_charging_rule_follows_source_state():
     assert config["state_entity"] == "sensor.tesla_wall_connector_status"
     assert config["active_state"] == "charging"
     assert config["duration"] == 0
-    assert config["groups"] == ["near_garage"]
+    assert "targets" not in config
+    assert "groups" not in config
 
 
 @pytest.mark.asyncio
 async def test_tesla_ready_rule_accepts_300_second_source_timer():
-    flow = _flow(
-        {
-            "groups": {
-                "near_garage": {
-                    "slug": "near_garage",
-                    "display_name": "Near garage",
-                }
-            },
-            "notifications": {},
-        }
-    )
+    flow = _flow()
     await flow.async_step_add_notification(
         {
             "name": "Tesla charger ready",
@@ -195,17 +226,7 @@ async def test_tesla_ready_rule_accepts_300_second_source_timer():
 
 @pytest.mark.asyncio
 async def test_hvac_rule_can_watch_attribute_as_one_pixel_indicator():
-    flow = _flow(
-        {
-            "groups": {
-                "bedrooms_hvac": {
-                    "slug": "bedrooms_hvac",
-                    "display_name": "Bedrooms HVAC",
-                }
-            },
-            "notifications": {},
-        }
-    )
+    flow = _flow()
     await flow.async_step_add_notification(
         {
             "name": "Bedrooms heating",
@@ -216,11 +237,7 @@ async def test_hvac_rule_can_watch_attribute_as_one_pixel_indicator():
     await flow.async_step_notification_source({"state_entity": "climate.bedrooms"})
     await flow.async_step_notification_property({"source_property": "hvac_action"})
     result = await flow.async_step_notification_details(
-        _details(
-            groups=["bedrooms_hvac"],
-            active_state="heating",
-            display_mode="indicator",
-        )
+        _details(active_state="heating", display_mode="indicator")
     )
 
     config = result["data"]["notifications"]["bedrooms_heating"]
@@ -231,15 +248,16 @@ async def test_hvac_rule_can_watch_attribute_as_one_pixel_indicator():
 
 
 @pytest.mark.asyncio
-async def test_notification_requires_a_group_or_direct_target():
+async def test_manual_notification_needs_no_target_selection():
+    """The point of the v4 redesign: notifications inherit the catalog's targets."""
     flow = _flow()
     await flow.async_step_add_notification(
         {
-            "name": "Nowhere",
-            "description": "Invalid rule",
+            "name": "Fridge ajar",
+            "description": "Door may be cracked",
             "activation": "manual_while",
         }
     )
-    result = await flow.async_step_notification_details(_details(groups=[], targets={}))
-    assert result["type"] == "form"
-    assert result["errors"]["base"] == "target_required"
+    result = await flow.async_step_notification_details(_details())
+    assert result["type"] == "create_entry"
+    assert "fridge_ajar" in result["data"]["notifications"]

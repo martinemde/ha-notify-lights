@@ -182,38 +182,22 @@ def notifications_from_options(options: dict) -> dict[str, Notification]:
     return result
 
 
-def resolve_notification_targets(
-    hass: HomeAssistant,
-    config: dict,
-    groups: dict[str, dict] | None = None,
-) -> list[str]:
-    """Resolve one notification's targets, minus anything it excludes.
+def resolve_entry_targets(hass: HomeAssistant, options: dict) -> list[str]:
+    """Resolve one catalog's fixed target set, minus anything it excludes.
 
     `targets` and `exclude` are both TargetSelector values, so each may name
-    entities, devices and areas at once; they are unioned before subtracting.
-    This is what lets a notification say "the whole house except the kids'
-    rooms" -- target the interior light group, exclude those two areas --
-    without enumerating every switch that should light up.
+    entities, devices and areas at once. This is what lets a catalog say
+    "the whole house except the kids' rooms" without enumerating every
+    switch that should light up. Every notification in the catalog shares
+    this same target set -- a catalog is a light group.
     """
-    included = set(resolve_targets(hass, config.get("targets", {})))
-    for group_slug in config.get("groups", []):
-        group = (groups or {}).get(group_slug)
-        if group is None:
-            _LOGGER.warning(
-                "Notification %s references missing light group %s",
-                config.get("slug", "<unknown>"),
-                group_slug,
-            )
-            continue
-        group_targets = set(resolve_targets(hass, group.get("targets", {})))
-        group_targets.difference_update(resolve_targets(hass, group.get("exclude", {})))
-        included.update(group_targets)
-    excluded = set(resolve_targets(hass, config.get("exclude", {})))
+    included = set(resolve_targets(hass, options.get("targets", {})))
+    excluded = set(resolve_targets(hass, options.get("exclude", {})))
     if not excluded:
         return sorted(included)
     kept = sorted(entity_id for entity_id in included if entity_id not in excluded)
     _LOGGER.debug(
-        "Resolved targets: %d included, %d excluded, %d kept",
+        "Resolved catalog targets: %d included, %d excluded, %d kept",
         len(included),
         len(excluded),
         len(kept),
@@ -222,42 +206,38 @@ def resolve_notification_targets(
 
 
 def targets_from_options(hass: HomeAssistant, options: dict) -> dict[str, list[str]]:
-    """Resolve every notification's targets, keyed by slug."""
-    groups = options.get("groups", {})
-    return {
-        slug: resolve_notification_targets(hass, config, groups)
-        for slug, config in options.get("notifications", {}).items()
-    }
+    """Resolve the catalog's targets, keyed by notification slug.
+
+    Every notification in a catalog shares one target set, so every value
+    here is the same list -- keyed by slug only because switch/button/
+    binary_sensor setup already expects that shape.
+    """
+    entry_targets = resolve_entry_targets(hass, options)
+    return {slug: entry_targets for slug in options.get("notifications", {})}
 
 
 def transport_groups_from_options(
     hass: HomeAssistant,
     coordinator: NotifyLightsCoordinator,
     options: dict,
+    *,
+    name: str = "Notify Lights",
 ) -> list[TransportGroup]:
-    """Build adapter-native delivery groups from reusable light groups."""
-    result: list[TransportGroup] = []
-    for slug, config in options.get("groups", {}).items():
-        target = str(config.get("zigbee2mqtt_group", "")).strip()
-        if not target:
-            continue
-        if target.startswith("zigbee2mqtt/"):
-            target = target.removeprefix("zigbee2mqtt/")
-        if target.endswith("/set"):
-            target = target.removesuffix("/set")
+    """Build the adapter-native delivery group for one catalog, if configured."""
+    target = str(options.get("zigbee2mqtt_group", "")).strip()
+    if not target:
+        return []
+    if target.startswith("zigbee2mqtt/"):
+        target = target.removeprefix("zigbee2mqtt/")
+    if target.endswith("/set"):
+        target = target.removesuffix("/set")
 
-        members = set(resolve_targets(hass, config.get("targets", {})))
-        members.difference_update(resolve_targets(hass, config.get("exclude", {})))
-        supported = frozenset(coordinator.supported_targets(sorted(members)))
-        if supported:
-            result.append(
-                TransportGroup(
-                    name=config.get("display_name", slug),
-                    target=target,
-                    members=supported,
-                )
-            )
-    return result
+    members = set(resolve_targets(hass, options.get("targets", {})))
+    members.difference_update(resolve_targets(hass, options.get("exclude", {})))
+    supported = frozenset(coordinator.supported_targets(sorted(members)))
+    if not supported:
+        return []
+    return [TransportGroup(name=name, target=target, members=supported)]
 
 
 def _state_group_members(state) -> list[str]:
@@ -272,39 +252,31 @@ def _state_group_members(state) -> list[str]:
 
 
 def _pending_native_group_entities(hass: HomeAssistant, options: dict) -> set[str]:
-    """Find native transport groups whose single HA group is not ready yet.
+    """Find a native transport group whose single HA group is not ready yet.
 
     Zigbee2MQTT group light entities can be registered after Notify Lights
     during startup. A single entity target on a native transport group is the
     group-entity configuration; explicit multi-entity groups (such as the
     security group) already describe their physical members directly.
     """
-    pending: set[str] = set()
-    for config in options.get("groups", {}).values():
-        if not str(config.get("zigbee2mqtt_group", "")).strip():
-            continue
-        entity_ids = config.get("targets", {}).get("entity_id", [])
-        if len(entity_ids) != 1:
-            continue
-        entity_id = entity_ids[0]
-        if not _state_group_members(hass.states.get(entity_id)):
-            pending.add(entity_id)
-    return pending
+    if not str(options.get("zigbee2mqtt_group", "")).strip():
+        return set()
+    entity_ids = options.get("targets", {}).get("entity_id", [])
+    if len(entity_ids) != 1:
+        return set()
+    entity_id = entity_ids[0]
+    if _state_group_members(hass.states.get(entity_id)):
+        return set()
+    return {entity_id}
 
 
-async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Migrate old target storage and add explicit v3 rule metadata.
+def _migrate_to_v3(entry: ConfigEntry) -> dict:
+    """Return v3-shaped options: targets on each notification, plus groups.
 
     v1 modelled a config entry as a pool of lights. v2 moved targets onto each
-    notification. v3 adds reusable light groups and explicit activation labels
-    while retaining the compact duration/source runtime representation.
-
-    Entries are migrated in place and existing notification slugs remain
-    stable, preserving entity unique IDs and automation references.
+    notification. v3 adds reusable light groups and explicit activation
+    labels while retaining the compact duration/source runtime representation.
     """
-    if entry.version >= 3:
-        return True
-
     pool_targets = entry.data.get("targets", {}) if entry.version < 2 else {}
     notifications = {
         slug: {
@@ -330,22 +302,117 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         }
         for slug, config in entry.options.get("notifications", {}).items()
     }
+    return {
+        **entry.options,
+        "groups": entry.options.get("groups", {}),
+        "notifications": notifications,
+    }
+
+
+def _merge_target_selectors(*selectors: dict | list) -> dict[str, list[str]]:
+    """Union any number of TargetSelector values into one."""
+    merged: dict[str, list[str]] = {}
+    for selector_value in selectors:
+        if not selector_value:
+            continue
+        normalized = (
+            {"entity_id": selector_value}
+            if isinstance(selector_value, list)
+            else selector_value
+        )
+        for key, values in normalized.items():
+            if not values:
+                continue
+            merged[key] = sorted(set(merged.get(key, [])) | set(values))
+    return merged
+
+
+def _migrate_v3_to_v4(entry_id: str, options: dict) -> dict:
+    """Collapse per-notification targets and reusable groups into one set.
+
+    v4 makes a catalog itself a light group: every notification in it shares
+    one fixed target set, so a single brightness/effect light entity can
+    represent the whole catalog. This merge is best-effort -- it unions every
+    target selector the catalog used to reference. Catalogs that previously
+    routed different notifications to different areas end up targeting the
+    union of all of them; split such a catalog into one per area afterward
+    using each notification's original targets as a guide.
+    """
+    groups = options.get("groups", {})
+    notifications = options.get("notifications", {})
+
+    target_selectors = []
+    exclude_selectors = []
+    zigbee_groups: set[str] = set()
+
+    def _collect_group(group: dict) -> None:
+        target_selectors.append(group.get("targets", {}))
+        exclude_selectors.append(group.get("exclude", {}))
+        zigbee_group = str(group.get("zigbee2mqtt_group", "")).strip()
+        if zigbee_group:
+            zigbee_groups.add(zigbee_group)
+
+    for config in notifications.values():
+        target_selectors.append(config.get("targets", {}))
+        exclude_selectors.append(config.get("exclude", {}))
+        for group_slug in config.get("groups", []):
+            group = groups.get(group_slug)
+            if group is not None:
+                _collect_group(group)
+
+    for group in groups.values():
+        _collect_group(group)
+
+    if len(zigbee_groups) > 1:
+        _LOGGER.warning(
+            "Catalog %s merges %d distinct Zigbee2MQTT groups (%s) into one "
+            "entry-level target set; leaving zigbee2mqtt_group blank. Split "
+            "this catalog and re-set each one's group under Edit targets.",
+            entry_id,
+            len(zigbee_groups),
+            sorted(zigbee_groups),
+        )
+
+    migrated_notifications = {
+        slug: {
+            k: v for k, v in config.items() if k not in {"targets", "exclude", "groups"}
+        }
+        for slug, config in notifications.items()
+    }
+
+    return {
+        "targets": _merge_target_selectors(*target_selectors),
+        "exclude": _merge_target_selectors(*exclude_selectors),
+        "zigbee2mqtt_group": (
+            next(iter(zigbee_groups)) if len(zigbee_groups) == 1 else ""
+        ),
+        "notifications": migrated_notifications,
+    }
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate old target storage up to v4's entry-level target set.
+
+    Entries are migrated in place and existing notification slugs remain
+    stable, preserving entity unique IDs and automation references.
+    """
+    if entry.version >= 4:
+        return True
+
+    options = _migrate_to_v3(entry) if entry.version < 3 else dict(entry.options)
+    options = _migrate_v3_to_v4(entry.entry_id, options)
     new_data = {k: v for k, v in entry.data.items() if k != "targets"}
 
     _LOGGER.info(
-        "Migrating entry %s to v3 with %d notification rule(s)",
+        "Migrating entry %s to v4 with %d notification rule(s)",
         entry.entry_id,
-        len(notifications),
+        len(options["notifications"]),
     )
     hass.config_entries.async_update_entry(
         entry,
         data=new_data,
-        options={
-            **entry.options,
-            "groups": entry.options.get("groups", {}),
-            "notifications": notifications,
-        },
-        version=3,
+        options=options,
+        version=4,
     )
     return True
 
@@ -362,7 +429,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
     coordinator.register_transport_groups(
         entry.entry_id,
-        transport_groups_from_options(hass, coordinator, entry.options),
+        transport_groups_from_options(
+            hass,
+            coordinator,
+            entry.options,
+            name=entry.data.get("name", "Notify Lights"),
+        ),
     )
 
     # One device per config entry; every notification entity hangs off it.
@@ -373,7 +445,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         name=entry.data.get("name", "Notify Lights"),
     )
 
-    entry_targets = sorted({t for resolved in targets.values() for t in resolved})
+    entry_targets = coordinator.supported_targets(
+        resolve_entry_targets(hass, entry.options)
+    )
     hass.data[DOMAIN][entry.entry_id] = {
         "coordinator": coordinator,
         "notifications": notifications,

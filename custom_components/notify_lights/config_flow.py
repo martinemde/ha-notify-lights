@@ -1,9 +1,10 @@
 """Config and options flows for Notify Lights.
 
-The options flow deliberately speaks in two concepts:
-
-* light groups are reusable routes such as "whole house except kids"; and
-* notification rules say when, what, and which light groups.
+A catalog (config entry) is itself a light group: it has one fixed target
+set, set once when the catalog is created and editable afterward under
+"Edit targets". Every notification rule inside it shares that target set --
+there is nothing to route per rule. Areas that should light up differently
+get their own catalog.
 
 Activation is selected explicitly. Duration is never used as a hidden type
 switch in the UI, even though the compact stored/runtime model still represents
@@ -128,9 +129,6 @@ def notification_config(slug: str, draft: dict[str, Any]) -> dict[str, Any]:
         "display_name": draft["name"],
         "description": draft.get("description", ""),
         "activation": activation.value,
-        "groups": list(draft.get("groups", [])),
-        "targets": draft.get("targets", {}),
-        "exclude": draft.get("exclude", {}),
         "color": draft["color"],
         "effect": draft["effect"],
         "effect_speed": draft["effect_speed"],
@@ -144,18 +142,6 @@ def notification_config(slug: str, draft: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _group_config(slug: str, user_input: dict[str, Any]) -> dict[str, Any]:
-    """Build one reusable light group."""
-    return {
-        "slug": slug,
-        "display_name": user_input["name"],
-        "description": user_input.get("description", ""),
-        "targets": user_input["targets"],
-        "exclude": user_input.get("exclude", {}),
-        "zigbee2mqtt_group": user_input.get("zigbee2mqtt_group", "").strip(),
-    }
-
-
 def _description_field(current: dict[str, Any]) -> tuple[Any, Any]:
     """Return the common description schema pair."""
     return (
@@ -164,19 +150,16 @@ def _description_field(current: dict[str, Any]) -> tuple[Any, Any]:
     )
 
 
-def _group_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
-    """Build the reusable light-group form."""
+def _targets_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
+    """Build the catalog-wide target selection form.
+
+    Every notification rule in this catalog shares this target set. If the
+    same switches also belong to a Zigbee2MQTT group, naming it here lets
+    Notify Lights send one native groupcast instead of one command per switch.
+    """
     current = defaults or {}
-    name_key = (
-        vol.Required("name", default=current["display_name"])
-        if "display_name" in current
-        else vol.Required("name")
-    )
-    description_key, description_selector = _description_field(current)
     return vol.Schema(
         {
-            name_key: selector.TextSelector(),
-            description_key: description_selector,
             vol.Required(
                 "targets", default=current.get("targets", {})
             ): _target_selector(),
@@ -300,86 +283,68 @@ def _state_options(
 
 def _notification_details_schema(
     hass,
-    groups: dict[str, Any],
     draft: dict[str, Any],
 ) -> vol.Schema:
-    """Build the routing and appearance step for a notification rule."""
+    """Build the appearance step for a notification rule.
+
+    Routing is decided once for the whole catalog (see `_targets_schema`),
+    so this step is purely about what the notification looks like.
+    """
     activation = Activation(draft["activation"])
-    fields: dict[Any, Any] = {}
-
-    if groups:
-        fields[vol.Optional("groups", default=draft.get("groups", []))] = (
-            selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=_slug_options(groups),
-                    multiple=True,
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                )
+    fields: dict[Any, Any] = {
+        vol.Required(
+            "color", default=draft.get("color", "blue")
+        ): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=COLOR_OPTIONS,
+                mode=selector.SelectSelectorMode.DROPDOWN,
             )
-        )
-
-    fields.update(
-        {
-            vol.Optional(
-                "targets", default=draft.get("targets", {})
-            ): _target_selector(),
-            vol.Optional(
-                "exclude", default=draft.get("exclude", {})
-            ): _target_selector(),
-            vol.Required(
-                "color", default=draft.get("color", "blue")
-            ): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=COLOR_OPTIONS,
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                )
-            ),
-            vol.Required(
-                "effect", default=draft.get("effect", Effect.SOLID)
-            ): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=EFFECT_OPTIONS,
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                )
-            ),
-            vol.Required(
-                "effect_speed", default=draft.get("effect_speed", DEFAULT_SPEED)
-            ): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=SPEED_OPTIONS,
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                )
-            ),
-            vol.Required(
-                "brightness", default=draft.get("brightness", DEFAULT_BRIGHTNESS)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0,
-                    max=100,
-                    step=1,
-                    mode=selector.NumberSelectorMode.SLIDER,
-                )
-            ),
-            vol.Required(
-                "priority", default=draft.get("priority", DEFAULT_PRIORITY)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0,
-                    max=100,
-                    step=1,
-                    mode=selector.NumberSelectorMode.SLIDER,
-                )
-            ),
-            vol.Required(
-                "display_mode", default=draft.get("display_mode", DisplayMode.FULL)
-            ): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=DISPLAY_MODE_OPTIONS,
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                )
-            ),
-        }
-    )
+        ),
+        vol.Required(
+            "effect", default=draft.get("effect", Effect.SOLID)
+        ): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=EFFECT_OPTIONS,
+                mode=selector.SelectSelectorMode.DROPDOWN,
+            )
+        ),
+        vol.Required(
+            "effect_speed", default=draft.get("effect_speed", DEFAULT_SPEED)
+        ): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=SPEED_OPTIONS,
+                mode=selector.SelectSelectorMode.DROPDOWN,
+            )
+        ),
+        vol.Required(
+            "brightness", default=draft.get("brightness", DEFAULT_BRIGHTNESS)
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0,
+                max=100,
+                step=1,
+                mode=selector.NumberSelectorMode.SLIDER,
+            )
+        ),
+        vol.Required(
+            "priority", default=draft.get("priority", DEFAULT_PRIORITY)
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0,
+                max=100,
+                step=1,
+                mode=selector.NumberSelectorMode.SLIDER,
+            )
+        ),
+        vol.Required(
+            "display_mode", default=draft.get("display_mode", DisplayMode.FULL)
+        ): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=DISPLAY_MODE_OPTIONS,
+                mode=selector.SelectSelectorMode.DROPDOWN,
+            )
+        ),
+    }
 
     if activation in {Activation.STATE_WHILE, Activation.STATE_ENTERED}:
         state_values = _state_options(
@@ -417,9 +382,9 @@ def _notification_details_schema(
 
 
 class NotifyLightsConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Create one notification catalog."""
+    """Create one notification catalog: a name plus its fixed target set."""
 
-    VERSION = 3
+    VERSION = 4
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -436,12 +401,34 @@ class NotifyLightsConfigFlow(ConfigFlow, domain=DOMAIN):
                 ),
             )
 
-        name = user_input["name"]
-        _LOGGER.info("Creating notification catalog %r", name)
-        return self.async_create_entry(
-            title=name,
-            data={"name": name},
-            options={"groups": {}, "notifications": {}},
+        self._name = user_input["name"]
+        return await self.async_step_targets()
+
+    async def async_step_targets(
+        self, user_input: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            if not _has_targets(user_input.get("targets")):
+                errors["base"] = "target_required"
+            else:
+                _LOGGER.info("Creating notification catalog %r", self._name)
+                return self.async_create_entry(
+                    title=self._name,
+                    data={"name": self._name},
+                    options={
+                        "targets": user_input["targets"],
+                        "exclude": user_input.get("exclude", {}),
+                        "zigbee2mqtt_group": user_input.get(
+                            "zigbee2mqtt_group", ""
+                        ).strip(),
+                        "notifications": {},
+                    },
+                )
+        return self.async_show_form(
+            step_id="targets",
+            data_schema=_targets_schema(),
+            errors=errors,
         )
 
     @staticmethod
@@ -455,15 +442,26 @@ class NotifyLightsConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class NotifyLightsOptionsFlow(OptionsFlow):
-    """Manage reusable target groups and notification rules."""
+    """Manage a catalog's target set and its notification rules."""
 
     def _options(self) -> dict[str, Any]:
         return self.config_entry.options
 
-    def _save(self, *, groups=None, notifications=None):
+    def _save(
+        self,
+        *,
+        targets=None,
+        exclude=None,
+        zigbee2mqtt_group=None,
+        notifications=None,
+    ):
         options = deepcopy(dict(self._options()))
-        if groups is not None:
-            options["groups"] = groups
+        if targets is not None:
+            options["targets"] = targets
+        if exclude is not None:
+            options["exclude"] = exclude
+        if zigbee2mqtt_group is not None:
+            options["zigbee2mqtt_group"] = zigbee2mqtt_group
         if notifications is not None:
             options["notifications"] = notifications
         return self.async_create_entry(data=options)
@@ -471,85 +469,28 @@ class NotifyLightsOptionsFlow(OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> dict[str, Any]:
-        groups = self._options().get("groups", {})
         notifications = self._options().get("notifications", {})
-        menu = ["add_group"]
-        if groups:
-            menu.extend(["modify_group", "delete_group"])
-        menu.append("add_notification")
+        menu = ["edit_targets", "add_notification"]
         if notifications:
             menu.extend(["modify_notification", "delete_notification"])
         return self.async_show_menu(step_id="init", menu_options=menu)
 
-    async def async_step_add_group(
+    async def async_step_edit_targets(
         self, user_input: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         errors: dict[str, str] = {}
         if user_input is not None:
-            name = user_input["name"]
-            slug = _slugify(name)
-            groups = dict(self._options().get("groups", {}))
-            if not slug:
-                errors["name"] = "invalid_name"
-            elif slug in groups:
-                errors["name"] = "name_exists"
+            if not _has_targets(user_input.get("targets")):
+                errors["base"] = "target_required"
             else:
-                groups[slug] = _group_config(slug, user_input)
-                _LOGGER.info("Added light group %r (slug=%r)", name, slug)
-                return self._save(groups=groups)
-
+                return self._save(
+                    targets=user_input["targets"],
+                    exclude=user_input.get("exclude", {}),
+                    zigbee2mqtt_group=user_input.get("zigbee2mqtt_group", "").strip(),
+                )
         return self.async_show_form(
-            step_id="add_group",
-            data_schema=_group_schema(),
-            errors=errors,
-        )
-
-    async def async_step_modify_group(
-        self, user_input: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
-        groups = dict(self._options().get("groups", {}))
-        if user_input is not None:
-            self._editing_slug = user_input["slug"]
-            return await self.async_step_modify_group_form()
-        return self.async_show_form(
-            step_id="modify_group",
-            data_schema=_choose_schema(groups),
-        )
-
-    async def async_step_modify_group_form(
-        self, user_input: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
-        slug = self._editing_slug
-        groups = dict(self._options().get("groups", {}))
-        if user_input is not None:
-            groups[slug] = _group_config(slug, user_input)
-            _LOGGER.info("Modified light group slug=%r", slug)
-            return self._save(groups=groups)
-        return self.async_show_form(
-            step_id="modify_group_form",
-            data_schema=_group_schema(groups[slug]),
-        )
-
-    async def async_step_delete_group(
-        self, user_input: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
-        groups = dict(self._options().get("groups", {}))
-        errors: dict[str, str] = {}
-        if user_input is not None:
-            slug = user_input["slug"]
-            in_use = any(
-                slug in config.get("groups", [])
-                for config in self._options().get("notifications", {}).values()
-            )
-            if in_use:
-                errors["base"] = "group_in_use"
-            else:
-                groups.pop(slug, None)
-                _LOGGER.info("Deleted light group slug=%r", slug)
-                return self._save(groups=groups)
-        return self.async_show_form(
-            step_id="delete_group",
-            data_schema=_choose_schema(groups),
+            step_id="edit_targets",
+            data_schema=_targets_schema(self._options()),
             errors=errors,
         )
 
@@ -631,25 +572,17 @@ class NotifyLightsOptionsFlow(OptionsFlow):
     async def async_step_notification_details(
         self, user_input: dict[str, Any] | None = None
     ) -> dict[str, Any]:
-        groups = self._options().get("groups", {})
-        errors: dict[str, str] = {}
         if user_input is not None:
             self._draft.update(user_input)
-            if not self._draft.get("groups") and not _has_targets(
-                self._draft.get("targets")
-            ):
-                errors["base"] = "target_required"
-            else:
-                notifications = dict(self._options().get("notifications", {}))
-                notifications[self._editing_slug] = notification_config(
-                    self._editing_slug, self._draft
-                )
-                _LOGGER.info("Saved notification rule slug=%r", self._editing_slug)
-                return self._save(notifications=notifications)
+            notifications = dict(self._options().get("notifications", {}))
+            notifications[self._editing_slug] = notification_config(
+                self._editing_slug, self._draft
+            )
+            _LOGGER.info("Saved notification rule slug=%r", self._editing_slug)
+            return self._save(notifications=notifications)
         return self.async_show_form(
             step_id="notification_details",
-            data_schema=_notification_details_schema(self.hass, groups, self._draft),
-            errors=errors,
+            data_schema=_notification_details_schema(self.hass, self._draft),
         )
 
     async def async_step_delete_notification(

@@ -1,4 +1,5 @@
 """Tests for the adapter ABC and registry with glob-based model matching."""
+
 from custom_components.notify_lights.adapter import (
     AdapterRegistry,
     NotificationAdapter,

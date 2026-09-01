@@ -190,9 +190,7 @@ class NotifyLightsCoordinator:
     ) -> None:
         """Track one entry's own active notification and notify listeners."""
         entries = self._entry_active.setdefault(pool_entry_id, [])
-        entries[:] = [
-            (n, t) for n, t in entries if n.name != notification.name
-        ]
+        entries[:] = [(n, t) for n, t in entries if n.name != notification.name]
         entries.append((notification, activated_at))
         self._notify_entry_listeners(pool_entry_id)
 
