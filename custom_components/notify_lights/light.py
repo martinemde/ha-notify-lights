@@ -119,6 +119,15 @@ class NotifyLightsGroupLight(LightEntity, RestoreEntity):
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs) -> None:
-        _LOGGER.info("Setting brightness ceiling for entry %s to 0", self._entry_id)
+        """Clear this entry's active notifications and mute future ones.
+
+        Clearing (rather than just zeroing the ceiling) frees whatever
+        priority slots those notifications held, so a lower-priority
+        notification from another catalog can show through immediately.
+        """
+        _LOGGER.info(
+            "Turning off entry %s: clearing notifications and muting", self._entry_id
+        )
+        await self._coordinator.async_clear_entry_notifications(self._entry_id)
         await self._coordinator.async_set_ceiling(self._entry_id, 0)
         self.async_write_ha_state()

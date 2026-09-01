@@ -115,9 +115,15 @@ to an [Adaptive Lighting](https://github.com/basnijholt/adaptive-lighting)
 light group: Adaptive Lighting pushes its computed brightness to the entity
 whenever it turns on and periodically while it stays on, so a long-running
 notification (Tesla charging, say) actually dims through the evening instead
-of freezing at whatever brightness it started with. Turning the entity off
-sets the ceiling to zero, which is the same as turning the switches off by
-hand — nothing from that catalog will render until it's raised again.
+of freezing at whatever brightness it started with.
+
+Turning the entity off clears every notification currently active for that
+catalog and mutes future ones (ceiling zero) until it's turned back on —
+the same as turning the switches off by hand. Clearing, rather than just
+muting, matters when catalogs overlap on the same switch: a muted-but-still-
+active high-priority notification would otherwise keep occupying its
+priority slot rendered black, hiding a lower-priority notification from
+another catalog that should be visible instead.
 
 ## Layering on Inovelli Blue switches
 

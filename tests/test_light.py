@@ -166,6 +166,51 @@ async def test_turn_off_zeroes_ceiling():
 
 
 @pytest.mark.asyncio
+async def test_turn_off_clears_active_notifications():
+    coordinator = _make_coordinator()
+    light = NotifyLightsGroupLight(coordinator, _make_entry(), TARGETS)
+    await coordinator.async_activate(_make_notif(), TARGETS, ENTRY_ID)
+    assert light.is_on is True
+
+    await light.async_turn_off()
+
+    assert light.is_on is False
+    assert coordinator.entry_active_set(ENTRY_ID) == []
+
+
+@pytest.mark.asyncio
+async def test_turn_off_removes_the_notification_from_the_render_stack():
+    """A ceiling of zero alone would still occupy the top priority slot.
+
+    Zeroing brightness leaves the entry in the stack, so a real adapter's
+    priority-based layering (e.g. the Inovelli bar's two visible slots)
+    would still give it the primary slot -- rendered black -- ahead of a
+    lower-priority notification from another catalog. Clearing removes it
+    outright so that lower-priority notification can take the slot.
+    """
+    coordinator = _make_coordinator()
+    render_calls = []
+
+    class RecordingAdapter(MockAdapter):
+        async def render(self, target, active):
+            render_calls.append(list(active))
+
+    coordinator._adapter_registry = AdapterRegistry()
+    coordinator._adapter_registry.register(RecordingAdapter())
+    light = NotifyLightsGroupLight(coordinator, _make_entry(), TARGETS)
+
+    high = _make_notif(name="high", priority=90)
+    low = _make_notif(name="low", priority=10)
+    await coordinator.async_activate(high, TARGETS, ENTRY_ID)
+    await coordinator.async_activate(low, TARGETS, "other_entry")
+
+    await light.async_turn_off()
+
+    names = [entry[0].name for entry in render_calls[-1]]
+    assert names == ["low"]
+
+
+@pytest.mark.asyncio
 async def test_ceiling_scales_what_the_adapter_renders():
     coordinator = _make_coordinator()
     render_calls = []

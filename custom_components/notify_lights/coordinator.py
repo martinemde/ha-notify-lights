@@ -168,13 +168,7 @@ class NotifyLightsCoordinator:
 
     async def async_deactivate_entry(self, pool_entry_id: str) -> None:
         """Remove every active notification owned by one config entry."""
-        changed_targets: list[str] = []
-        for target, stack in self._stacks.items():
-            kept = [entry for entry in stack if entry[1] != pool_entry_id]
-            if len(kept) != len(stack):
-                self._stacks[target] = kept
-                changed_targets.append(target)
-
+        changed_targets = self._remove_entry_from_stacks(pool_entry_id)
         self._entry_active.pop(pool_entry_id, None)
         self._ceilings.pop(pool_entry_id, None)
         self._entry_listeners.pop(pool_entry_id, None)
@@ -183,7 +177,39 @@ class NotifyLightsCoordinator:
             pool_entry_id,
             len(changed_targets),
         )
-        await self._render_targets(set(changed_targets))
+        await self._render_targets(changed_targets)
+
+    async def async_clear_entry_notifications(self, pool_entry_id: str) -> None:
+        """Deactivate every notification currently active for one entry.
+
+        Used when a catalog's brightness light turns off. A ceiling of zero
+        alone mutes rendering but leaves the entry's notifications occupying
+        their priority slots in the stack, which can keep a lower-priority
+        notification from another catalog from showing through. Clearing
+        frees those slots outright. Unlike `async_deactivate_entry`, the
+        entry's ceiling and listener registrations survive -- this entry can
+        still be reactivated (and stay muted, if it was) rather than torn
+        down.
+        """
+        changed_targets = self._remove_entry_from_stacks(pool_entry_id)
+        self._entry_active[pool_entry_id] = []
+        _LOGGER.info(
+            "Cleared entry %s notifications on %d targets",
+            pool_entry_id,
+            len(changed_targets),
+        )
+        self._notify_entry_listeners(pool_entry_id)
+        await self._render_targets(changed_targets)
+
+    def _remove_entry_from_stacks(self, pool_entry_id: str) -> set[str]:
+        """Remove one entry's entries from every physical target's stack."""
+        changed_targets: set[str] = set()
+        for target, stack in self._stacks.items():
+            kept = [entry for entry in stack if entry[1] != pool_entry_id]
+            if len(kept) != len(stack):
+                self._stacks[target] = kept
+                changed_targets.add(target)
+        return changed_targets
 
     def _set_entry_notification(
         self, pool_entry_id: str, notification: Notification, activated_at: float

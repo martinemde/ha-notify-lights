@@ -606,6 +606,70 @@ async def test_entry_listener_unsubscribe_stops_further_calls():
 
 
 @pytest.mark.asyncio
+async def test_clear_entry_notifications_removes_from_render_stack():
+    hass, entity_reg, device_reg = _mock_hass_with_device()
+    registry = AdapterRegistry()
+    mock_adapter = _make_adapter()
+    registry.register(mock_adapter)
+    coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
+    mine = _make_notif(name="mine")
+    other = _make_notif(name="other")
+    await coordinator.async_activate(mine, TARGETS, "pool_a")
+    await coordinator.async_activate(other, TARGETS, "pool_b")
+    mock_adapter.render.reset_mock()
+
+    await coordinator.async_clear_entry_notifications("pool_a")
+
+    active_set = mock_adapter.render.call_args[0][1]
+    assert [entry[0].name for entry in active_set] == ["other"]
+
+
+@pytest.mark.asyncio
+async def test_clear_entry_notifications_empties_entry_active_set():
+    hass, entity_reg, device_reg = _mock_hass_with_device()
+    registry = AdapterRegistry()
+    registry.register(_make_adapter())
+    coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
+    await coordinator.async_activate(_make_notif(), TARGETS, POOL_ID)
+
+    await coordinator.async_clear_entry_notifications(POOL_ID)
+
+    assert coordinator.entry_active_set(POOL_ID) == []
+
+
+@pytest.mark.asyncio
+async def test_clear_entry_notifications_preserves_ceiling_and_listener():
+    hass, entity_reg, device_reg = _mock_hass_with_device()
+    registry = AdapterRegistry()
+    registry.register(_make_adapter())
+    coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
+    await coordinator.async_activate(_make_notif(), TARGETS, POOL_ID)
+    await coordinator.async_set_ceiling(POOL_ID, 42)
+    calls = []
+    coordinator.async_add_entry_listener(POOL_ID, lambda: calls.append(1))
+
+    await coordinator.async_clear_entry_notifications(POOL_ID)
+
+    assert coordinator.get_ceiling(POOL_ID) == 42
+    assert calls, "listener should still fire after clearing"
+
+
+@pytest.mark.asyncio
+async def test_clear_entry_notifications_allows_reactivation():
+    hass, entity_reg, device_reg = _mock_hass_with_device()
+    registry = AdapterRegistry()
+    registry.register(_make_adapter())
+    coordinator = NotifyLightsCoordinator(hass, registry, entity_reg, device_reg)
+    notif = _make_notif()
+    await coordinator.async_activate(notif, TARGETS, POOL_ID)
+    await coordinator.async_clear_entry_notifications(POOL_ID)
+
+    await coordinator.async_activate(notif, TARGETS, POOL_ID)
+
+    assert [e[0].name for e in coordinator.entry_active_set(POOL_ID)] == [notif.name]
+
+
+@pytest.mark.asyncio
 async def test_entry_listener_not_called_for_other_entries():
     hass, entity_reg, device_reg = _mock_hass_with_device()
     registry = AdapterRegistry()
