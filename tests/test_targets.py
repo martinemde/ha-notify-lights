@@ -10,6 +10,7 @@ from custom_components.notify_lights import (
     notifications_from_options,
     resolve_entry_targets,
     targets_from_options,
+    transport_groups_from_options,
 )
 from custom_components.notify_lights.config_flow import notification_config
 
@@ -257,6 +258,46 @@ def test_zigbee2mqtt_group_entities_are_expanded():
     assert resolve_entry_targets(
         hass, {"targets": {"entity_id": ["light.notify_area"]}}
     ) == ["light.ceiling", "light.entry", "switch.dimmer"]
+
+
+def test_multiple_native_groups_build_independent_transport_groups():
+    hass = _hass()
+    coordinator = MagicMock()
+    coordinator.supported_targets.side_effect = lambda members: members
+    options = {
+        "targets": {"device_id": ["bedroom", "living", "great"]},
+        "zigbee2mqtt_groups": {
+            "bedroom": "notify/area/bedroom_area",
+            "living": "notify/area/living_area",
+            "great": "notify/area/great_area",
+        },
+    }
+    members = {
+        "bedroom": ["light.bed_1", "light.bed_2"],
+        "living": ["light.living_1"],
+        "great": ["light.great_1", "light.great_2"],
+    }
+
+    def resolve(_hass, targets):
+        if not targets:
+            return []
+        return members[targets["device_id"][0]]
+
+    with patch("custom_components.notify_lights.resolve_targets", side_effect=resolve):
+        groups = transport_groups_from_options(
+            hass, coordinator, options, name="Security"
+        )
+
+    assert {group.target for group in groups} == {
+        "notify/area/bedroom_area",
+        "notify/area/living_area",
+        "notify/area/great_area",
+    }
+    assert {group.members for group in groups} == {
+        frozenset({"light.bed_1", "light.bed_2"}),
+        frozenset({"light.living_1"}),
+        frozenset({"light.great_1", "light.great_2"}),
+    }
 
 
 def test_unavailable_single_entity_native_group_is_pending():

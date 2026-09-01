@@ -159,3 +159,16 @@ async def async_friendly_name_for_device(
         )
         return None
     return group.friendly_name
+
+
+async def async_groups_for_devices(
+    hass: HomeAssistant, devices: list[Any], *, timeout: float = 15.0
+) -> dict[str, Z2MGroup]:
+    """Resolve several HA group devices with one retained-registry read."""
+    registry = await async_get_groups(hass, timeout=timeout)
+    resolved: dict[str, Z2MGroup] = {}
+    for device in devices:
+        group_id = group_id_from_device(device)
+        if group_id is not None and (group := registry.get(group_id)) is not None:
+            resolved[device.id] = group
+    return resolved

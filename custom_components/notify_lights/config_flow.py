@@ -43,7 +43,7 @@ from .const import (
 from .z2m_groups import (
     Z2M_GROUP_MODEL,
     Z2M_MANUFACTURER,
-    async_friendly_name_for_device,
+    async_groups_for_devices,
     group_devices_from_targets,
 )
 
@@ -157,23 +157,27 @@ def _targets_from_device_ids(device_ids: list[str]) -> dict[str, list[str]]:
 
 async def _validated_target_options(
     hass, device_ids: list[str]
-) -> tuple[dict[str, list[str]], str, str | None]:
-    """Validate target mode and derive an exact native group friendly name."""
+) -> tuple[dict[str, list[str]], dict[str, str], str | None]:
+    """Validate target mode and derive exact native-group friendly names."""
     targets = _targets_from_device_ids(device_ids)
     native_groups = group_devices_from_targets(hass, targets)
-    if native_groups and (len(native_groups) != 1 or len(set(device_ids)) != 1):
-        return targets, "", "group_or_devices"
+    if native_groups and len(native_groups) != len(set(device_ids)):
+        return targets, {}, "group_or_devices"
     if not native_groups:
-        return targets, "", None
+        return targets, {}, None
 
     try:
-        friendly_name = await async_friendly_name_for_device(hass, native_groups[0])
+        resolved = await async_groups_for_devices(hass, native_groups)
     except Exception:
         _LOGGER.exception("Could not read the Zigbee2MQTT group registry")
-        return targets, "", "z2m_registry_unavailable"
-    if friendly_name is None:
-        return targets, "", "z2m_group_not_found"
-    return targets, friendly_name, None
+        return targets, {}, "z2m_registry_unavailable"
+    if len(resolved) != len(native_groups):
+        return targets, {}, "z2m_group_not_found"
+    return (
+        targets,
+        {device_id: group.friendly_name for device_id, group in resolved.items()},
+        None,
+    )
 
 
 def _activation_for_config(config: dict[str, Any]) -> Activation:
@@ -485,7 +489,7 @@ class NotifyLightsConfigFlow(ConfigFlow, domain=DOMAIN):
             if not _has_targets(user_input.get("targets")):
                 errors["base"] = "target_required"
             else:
-                targets, friendly_name, error = await _validated_target_options(
+                targets, native_groups, error = await _validated_target_options(
                     self.hass, user_input["targets"]
                 )
                 if error is not None:
@@ -498,7 +502,8 @@ class NotifyLightsConfigFlow(ConfigFlow, domain=DOMAIN):
                         options={
                             "targets": targets,
                             "exclude": {},
-                            "zigbee2mqtt_group": friendly_name,
+                            "zigbee2mqtt_group": "",
+                            "zigbee2mqtt_groups": native_groups,
                             "notifications": {},
                         },
                     )
@@ -530,6 +535,7 @@ class NotifyLightsOptionsFlow(OptionsFlow):
         targets=None,
         exclude=None,
         zigbee2mqtt_group=None,
+        zigbee2mqtt_groups=None,
         notifications=None,
     ):
         options = deepcopy(dict(self._options()))
@@ -539,6 +545,8 @@ class NotifyLightsOptionsFlow(OptionsFlow):
             options["exclude"] = exclude
         if zigbee2mqtt_group is not None:
             options["zigbee2mqtt_group"] = zigbee2mqtt_group
+        if zigbee2mqtt_groups is not None:
+            options["zigbee2mqtt_groups"] = zigbee2mqtt_groups
         if notifications is not None:
             options["notifications"] = notifications
         return self.async_create_entry(data=options)
@@ -560,7 +568,7 @@ class NotifyLightsOptionsFlow(OptionsFlow):
             if not _has_targets(user_input.get("targets")):
                 errors["base"] = "target_required"
             else:
-                targets, friendly_name, error = await _validated_target_options(
+                targets, native_groups, error = await _validated_target_options(
                     self.hass, user_input["targets"]
                 )
                 if error is not None:
@@ -569,7 +577,8 @@ class NotifyLightsOptionsFlow(OptionsFlow):
                     return self._save(
                         targets=targets,
                         exclude={},
-                        zigbee2mqtt_group=friendly_name,
+                        zigbee2mqtt_group="",
+                        zigbee2mqtt_groups=native_groups,
                     )
         return self.async_show_form(
             step_id="edit_targets",

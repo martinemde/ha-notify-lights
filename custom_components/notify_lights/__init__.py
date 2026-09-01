@@ -30,7 +30,7 @@ from .adapters.inovelli_blue_z2m import InovelliBlueZ2MAdapter
 from .const import DOMAIN, NAMED_COLORS, DisplayMode, Effect, Speed
 from .coordinator import NotifyLightsCoordinator, TransportGroup
 from .notification import Notification
-from .z2m_groups import async_friendly_name_for_device, group_devices_from_targets
+from .z2m_groups import async_groups_for_devices, group_devices_from_targets
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -224,21 +224,36 @@ def transport_groups_from_options(
     *,
     name: str = "Notify Lights",
 ) -> list[TransportGroup]:
-    """Build the adapter-native delivery group for one catalog, if configured."""
-    target = str(options.get("zigbee2mqtt_group", "")).strip()
-    if not target:
-        return []
-    if target.startswith("zigbee2mqtt/"):
-        target = target.removeprefix("zigbee2mqtt/")
-    if target.endswith("/set"):
-        target = target.removesuffix("/set")
+    """Build every adapter-native delivery group configured for a catalog."""
+    configured = dict(options.get("zigbee2mqtt_groups", {}))
+    groups: list[TransportGroup] = []
+    excluded = set(resolve_targets(hass, options.get("exclude", {})))
 
+    for device_id, configured_target in configured.items():
+        target = str(configured_target).strip()
+        if not target:
+            continue
+        target = target.removeprefix("zigbee2mqtt/").removesuffix("/set")
+        members = set(resolve_targets(hass, {"device_id": [device_id]}))
+        members.difference_update(excluded)
+        supported = frozenset(coordinator.supported_targets(sorted(members)))
+        if supported:
+            groups.append(
+                TransportGroup(
+                    name=f"{name}: {target}", target=target, members=supported
+                )
+            )
+
+    # Pre-0.9.3 entries stored one group name separately from their target.
+    if groups or not (target := str(options.get("zigbee2mqtt_group", "")).strip()):
+        return groups
+    target = target.removeprefix("zigbee2mqtt/").removesuffix("/set")
     members = set(resolve_targets(hass, options.get("targets", {})))
-    members.difference_update(resolve_targets(hass, options.get("exclude", {})))
+    members.difference_update(excluded)
     supported = frozenset(coordinator.supported_targets(sorted(members)))
-    if not supported:
-        return []
-    return [TransportGroup(name=name, target=target, members=supported)]
+    if supported:
+        groups.append(TransportGroup(name=name, target=target, members=supported))
+    return groups
 
 
 def _state_group_members(state) -> list[str]:
@@ -260,23 +275,26 @@ def _pending_native_group_entities(hass: HomeAssistant, options: dict) -> set[st
     group-entity configuration; explicit multi-entity groups (such as the
     security group) already describe their physical members directly.
     """
-    if not str(options.get("zigbee2mqtt_group", "")).strip():
+    if not options.get("zigbee2mqtt_groups") and not str(
+        options.get("zigbee2mqtt_group", "")
+    ).strip():
         return set()
 
     native_group_devices = group_devices_from_targets(
         hass, options.get("targets", {})
     )
-    if len(native_group_devices) == 1:
+    if native_group_devices:
         entity_registry = er.async_get(hass)
-        entity_ids = [
+        entity_ids = {
             entity.entity_id
-            for entity in er.async_entries_for_device(
-                entity_registry, native_group_devices[0].id
+            for device in native_group_devices
+            for entity in er.async_entries_for_device(entity_registry, device.id)
+            if (
+                entity.domain in SUPPORTED_DOMAINS
+                and entity.disabled_by is None
+                and entity.entity_category is None
             )
-            if entity.domain in SUPPORTED_DOMAINS
-            and entity.disabled_by is None
-            and entity.entity_category is None
-        ]
+        }
         return {
             entity_id
             for entity_id in entity_ids
@@ -453,11 +471,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     native_group_devices = group_devices_from_targets(
         hass, entry.options.get("targets", {})
     )
-    if len(native_group_devices) == 1:
+    if native_group_devices:
         try:
-            exact_name = await async_friendly_name_for_device(
-                hass, native_group_devices[0]
-            )
+            exact_groups = await async_groups_for_devices(hass, native_group_devices)
         except Exception:  # MQTT may still be reconnecting during startup.
             _LOGGER.exception(
                 "Could not refresh the Zigbee2MQTT group registry for catalog %s; "
@@ -465,8 +481,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 entry.entry_id,
             )
         else:
-            if exact_name is not None:
-                transport_options["zigbee2mqtt_group"] = exact_name
+            if exact_groups:
+                transport_options["zigbee2mqtt_groups"] = {
+                    device_id: group.friendly_name
+                    for device_id, group in exact_groups.items()
+                }
 
     coordinator.register_transport_groups(
         entry.entry_id,

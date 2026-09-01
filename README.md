@@ -10,7 +10,7 @@ Notify Lights has two user-facing concepts.
 ### A catalog is a device group
 
 Each Notify Lights device (config entry) has a name and one fixed target: one
-native Zigbee2MQTT group, or a set of physical Inovelli devices. It is chosen
+or more native Zigbee2MQTT groups, or a set of physical Inovelli devices. It is chosen
 when you create the catalog and editable afterward from its device page under
 **Edit notification lights**. Every notification rule inside a catalog shares
 that same target set — there is nothing to route per rule. Areas that should
@@ -22,8 +22,8 @@ light up differently get their own catalog, for example:
 - **Outside office** and **Outside bathroom** — one nearby switch each
 
 The picker lists Zigbee2MQTT group devices and physical Inovelli devices. Pick
-one group by itself to retain its dynamic membership and use native Zigbee
-groupcasts, or pick individual devices. For a group, Notify Lights joins the
+one or more groups to combine their memberships and use one native groupcast
+per group, or pick individual devices. For each group, Notify Lights joins the
 group's real numeric Zigbee ID to Zigbee2MQTT's retained
 `zigbee2mqtt/bridge/groups` registry and uses the exact published
 `friendly_name`; there is no manually entered topic or naming convention.
@@ -183,6 +183,12 @@ Manual rules remain ordinary Home Assistant entities:
 Automatic rules need no calling automation. Their binary sensors expose the
 source, matching state, duration, priority, and resolved physical targets as
 attributes.
+
+## Upgrading to 0.9.3
+
+One catalog can now combine multiple native Zigbee2MQTT groups. Their members
+form the catalog target union, and notifications use one groupcast per selected
+group. Groups and individual Inovelli devices remain separate target modes.
 
 ## Upgrading to 0.9.2
 

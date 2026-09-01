@@ -10,7 +10,7 @@
       },
       "targets": {
         "title": "Choose Notification Lights",
-        "description": "Choose one Zigbee2MQTT group to keep its membership dynamic and use native Zigbee groupcasts, or choose individual Inovelli devices. The group's exact MQTT friendly name is read directly from Zigbee2MQTT.",
+        "description": "Choose one or more Zigbee2MQTT groups to combine their memberships and use native Zigbee groupcasts, or choose individual Inovelli devices. Each group's exact MQTT friendly name is read directly from Zigbee2MQTT.",
         "data": {
           "targets": "Zigbee2MQTT group or Inovelli devices"
         }
@@ -31,7 +31,7 @@
       },
       "edit_targets": {
         "title": "Edit Notification Lights",
-        "description": "Choose one Zigbee2MQTT group to keep its membership dynamic and use native Zigbee groupcasts, or choose individual Inovelli devices. The group's exact MQTT friendly name is read directly from Zigbee2MQTT.",
+        "description": "Choose one or more Zigbee2MQTT groups to combine their memberships and use native Zigbee groupcasts, or choose individual Inovelli devices. Each group's exact MQTT friendly name is read directly from Zigbee2MQTT.",
         "data": {
           "targets": "Zigbee2MQTT group or Inovelli devices"
         }
@@ -99,7 +99,7 @@
       "name_exists": "A record with this name already exists.",
       "invalid_name": "Enter a name containing at least one letter or number.",
       "target_required": "Choose a Zigbee2MQTT group or at least one Inovelli device.",
-      "group_or_devices": "Choose one Zigbee2MQTT group by itself, or choose individual Inovelli devices.",
+      "group_or_devices": "Choose Zigbee2MQTT groups or individual Inovelli devices, but do not mix the two.",
       "z2m_registry_unavailable": "Could not read Zigbee2MQTT's group registry. Check that MQTT and Zigbee2MQTT are available, then try again.",
       "z2m_group_not_found": "That group is not present in Zigbee2MQTT's current group registry."
     }

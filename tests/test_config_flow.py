@@ -81,6 +81,7 @@ async def test_targets_step_creates_v4_catalog_with_its_target_set():
         "targets": TARGETS,
         "exclude": {},
         "zigbee2mqtt_group": "",
+        "zigbee2mqtt_groups": {},
         "notifications": {},
     }
 
@@ -207,6 +208,7 @@ async def test_edit_targets_saves_the_new_target_set():
     assert result["data"]["targets"] == {"device_id": ["device-new"]}
     assert result["data"]["exclude"] == {}
     assert result["data"]["zigbee2mqtt_group"] == ""
+    assert result["data"]["zigbee2mqtt_groups"] == {}
 
 
 @pytest.mark.asyncio
@@ -224,9 +226,13 @@ async def test_edit_targets_derives_exact_z2m_group_name_from_registry():
             return_value=[group_device],
         ),
         patch(
-            "custom_components.notify_lights.config_flow.async_friendly_name_for_device",
-            return_value="notify/area/living_area",
-        ) as resolve_name,
+            "custom_components.notify_lights.config_flow.async_groups_for_devices",
+            return_value={
+                "z2m-group-device": MagicMock(
+                    friendly_name="notify/area/living_area"
+                )
+            },
+        ) as resolve_groups,
     ):
         result = await flow.async_step_edit_targets(
             {"targets": ["z2m-group-device"]}
@@ -234,8 +240,46 @@ async def test_edit_targets_derives_exact_z2m_group_name_from_registry():
 
     assert result["type"] == "create_entry"
     assert result["data"]["targets"] == {"device_id": ["z2m-group-device"]}
-    assert result["data"]["zigbee2mqtt_group"] == "notify/area/living_area"
-    resolve_name.assert_awaited_once_with(flow.hass, group_device)
+    assert result["data"]["zigbee2mqtt_group"] == ""
+    assert result["data"]["zigbee2mqtt_groups"] == {
+        "z2m-group-device": "notify/area/living_area"
+    }
+    resolve_groups.assert_awaited_once_with(flow.hass, [group_device])
+
+
+@pytest.mark.asyncio
+async def test_edit_targets_accepts_multiple_native_groups():
+    flow = _flow()
+    living = MagicMock(id="living-group")
+    great = MagicMock(id="great-group")
+    bedroom = MagicMock(id="bedroom-group")
+    devices = [bedroom, great, living]
+    resolved = {
+        "bedroom-group": MagicMock(friendly_name="notify/area/bedroom_area"),
+        "great-group": MagicMock(friendly_name="notify/area/great_area"),
+        "living-group": MagicMock(friendly_name="notify/area/living_area"),
+    }
+    with (
+        patch(
+            "custom_components.notify_lights.config_flow.group_devices_from_targets",
+            return_value=devices,
+        ),
+        patch(
+            "custom_components.notify_lights.config_flow.async_groups_for_devices",
+            return_value=resolved,
+        ),
+    ):
+        result = await flow.async_step_edit_targets(
+            {"targets": ["living-group", "great-group", "bedroom-group"]}
+        )
+
+    assert result["type"] == "create_entry"
+    assert result["data"]["targets"] == {
+        "device_id": ["bedroom-group", "great-group", "living-group"]
+    }
+    assert result["data"]["zigbee2mqtt_groups"] == {
+        device_id: group.friendly_name for device_id, group in resolved.items()
+    }
 
 
 @pytest.mark.asyncio
