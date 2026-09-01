@@ -204,6 +204,53 @@ def _async_track_state_change_event(hass, entity_ids, callback):
 _event_module.async_track_state_change_event = _async_track_state_change_event
 sys.modules["homeassistant.helpers.event"] = _event_module
 
+# Light entity stub
+_light_module = types.ModuleType("homeassistant.components.light")
+
+
+class _ColorMode:
+    ONOFF = "onoff"
+    BRIGHTNESS = "brightness"
+    HS = "hs"
+
+
+class _LightEntityFeature:
+    EFFECT = 4
+
+
+class _LightEntity:
+    _attr_unique_id = None
+    _attr_name = None
+    _attr_has_entity_name = False
+    _attr_supported_color_modes: set = set()
+    _attr_color_mode = None
+    _attr_supported_features = 0
+    _attr_effect_list: list = []
+
+    @property
+    def unique_id(self):
+        return self._attr_unique_id
+
+    @property
+    def name(self):
+        return self._attr_name
+
+    async def async_added_to_hass(self):
+        pass
+
+    def async_on_remove(self, callback):
+        self._remove_callback = callback
+
+    def async_write_ha_state(self):
+        pass
+
+
+_light_module.ColorMode = _ColorMode
+_light_module.LightEntity = _LightEntity
+_light_module.LightEntityFeature = _LightEntityFeature
+_light_module.ATTR_BRIGHTNESS = "brightness"
+sys.modules["homeassistant.components.light"] = _light_module
+
 # Restore-state mixin stub
 _restore_state_module = types.ModuleType("homeassistant.helpers.restore_state")
 

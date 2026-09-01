@@ -33,7 +33,7 @@ from .notification import Notification
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["switch", "button", "binary_sensor"]
+PLATFORMS = ["switch", "button", "binary_sensor", "light"]
 
 
 def _get_or_create_coordinator(hass: HomeAssistant) -> NotifyLightsCoordinator:
@@ -373,10 +373,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         name=entry.data.get("name", "Notify Lights"),
     )
 
+    entry_targets = sorted({t for resolved in targets.values() for t in resolved})
     hass.data[DOMAIN][entry.entry_id] = {
         "coordinator": coordinator,
         "notifications": notifications,
         "targets": targets,
+        "entry_targets": entry_targets,
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
