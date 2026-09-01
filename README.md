@@ -7,20 +7,26 @@ smart switches.
 
 Notify Lights has two user-facing concepts.
 
-### Light groups answer “where?”
+### A catalog is a light group
 
-Create reusable destinations once, then use them from many rules:
+Each Notify Lights device (config entry) is itself one light group: it has a
+name and one fixed target set, chosen when you create it and editable
+afterward from its device page under **Edit targets**. Every notification
+rule inside a catalog shares that same target set — there is nothing to
+route per rule. Areas that should light up differently get their own
+catalog, for example:
 
 - **Common alerts** — most switches, excluding the kids’ rooms
 - **Near garage** — Great Room Entry Lights and Great Room Ceiling Lights
 - **Bedrooms HVAC** / **Living HVAC** — the non-kid-bedroom switches in each zone
 - **Outside office** and **Outside bathroom** — one nearby switch each
 
-A light group accepts Home Assistant entities, devices, and areas. Its
+A catalog's targets accept Home Assistant entities, devices, and areas. Its
 **Except** field subtracts entities, devices, or areas, making “the whole house
 except the kids’ rooms” a first-class configuration rather than a copied list.
 
-Editing a light group updates every notification rule that uses it.
+Editing a catalog's targets under **Edit targets** updates every notification
+rule inside it immediately.
 
 If the same switches belong to a Zigbee2MQTT group, enter that group's friendly
 name in **Zigbee2MQTT group** (for example, `notify/security`). Notify Lights
@@ -49,33 +55,34 @@ there is no need to create an intermediate template sensor. Notify Lights
 offers values reported by the chosen property (including enum options when
 available), while still allowing a custom value.
 
-Each rule chooses one or more light groups, optional additional targets, an
-optional exclusion, and its color/effect/brightness/priority. Coverage is an
+Each rule chooses its color/effect/brightness/priority. Coverage is an
 explicit choice between the full light bar and a one-pixel bottom indicator.
+Where it shows is decided once, for the whole catalog, under **Edit targets**.
 
 ## Tesla example
 
-First create **Near garage** containing:
+Create a **Near garage** catalog targeting:
 
 - light.great_room_entry_lights_2
 - light.great_room_ceiling_lights
 
-Then create two rules:
+Then add two rules inside it:
 
 | Rule | Activation | Source | State | Duration |
 |---|---|---|---|---|
 | Tesla charging | Show while in state | sensor.tesla_wall_connector_status | charging | While charging |
 | Tesla charger ready | Show when state is entered | sensor.tesla_wall_connector_status | ready | 300 seconds |
 
-Both rules route to **Near garage**. Charging synchronizes immediately after a
-Home Assistant restart. Ready is edge-triggered and deliberately does not replay
-merely because Home Assistant starts while the sensor already says ready.
+Both rules inherit the catalog's **Near garage** targets. Charging synchronizes
+immediately after a Home Assistant restart. Ready is edge-triggered and
+deliberately does not replay merely because Home Assistant starts while the
+sensor already says ready.
 
 ## Suggested rule layout
 
-The use cases below become a small number of groups plus straightforward rules:
+The use cases below become a small number of catalogs plus straightforward rules:
 
-| Situation | Light group | Source-state strategy |
+| Situation | Catalog | Source-state strategy |
 |---|---|---|
 | Doors unlocked | Common alerts | One while-state rule per lock, or a template binary sensor aggregating locks |
 | Backdoors open | Common alerts | While open |
@@ -85,11 +92,32 @@ The use cases below become a small number of groups plus straightforward rules:
 | Bathroom occupied | Outside bathroom | While occupied |
 | Fridge door open | Common alerts | While open |
 | Package at door | Common alerts | Timed on entering detected/delivered |
-| Garage door | Common alerts | Separate opening, closing, and open rules sharing one source and group |
+| Garage door | Common alerts | Separate opening, closing, and open rules sharing one source and catalog |
 
 A situation with visually distinct states is intentionally represented by
-multiple rules. They share the source and group, but each state owns its
+multiple rules. They share the source and catalog, but each state owns its
 appearance and timeout. That keeps priority arbitration and testing simple.
+
+## Dimming notifications at night
+
+Every catalog gets a companion light entity (`light.<catalog>_brightness`)
+alongside its switches, buttons, and binary sensors. Its on/off, color, and
+effect are a read-only mirror of whichever of that catalog's own
+notifications is currently highest priority — there's nothing to command
+there. Its **brightness** is the opposite: a live ceiling that scales every
+notification the catalog activates, wherever it renders, without touching
+any rule's own authored brightness.
+
+Lower that entity's brightness by hand, from a scene, or via an automation to
+quiet a bedroom catalog at night. Because it behaves like an ordinary light
+that turns on and off with real notification activity, it can also be added
+to an [Adaptive Lighting](https://github.com/basnijholt/adaptive-lighting)
+light group: Adaptive Lighting pushes its computed brightness to the entity
+whenever it turns on and periodically while it stays on, so a long-running
+notification (Tesla charging, say) actually dims through the evening instead
+of freezing at whatever brightness it started with. Turning the entity off
+sets the ceiling to zero, which is the same as turning the switches off by
+hand — nothing from that catalog will render until it's raised again.
 
 ## Layering on Inovelli Blue switches
 
@@ -150,6 +178,26 @@ Manual rules remain ordinary Home Assistant entities:
 Automatic rules need no calling automation. Their binary sensors expose the
 source, matching state, duration, priority, and resolved physical targets as
 attributes.
+
+## Upgrading to 0.9.0
+
+Entries migrate automatically to config version 4, which makes every catalog
+a light group with one fixed target set (see "A catalog is a light group"
+above) and adds each catalog's brightness light entity.
+
+- The migration unions every notification's own targets and every reusable
+  group it referenced (including groups that had a Zigbee2MQTT group set)
+  into the catalog's new root-level **targets**/**exclude**/**Zigbee2MQTT
+  group** fields. Nothing is dropped, but nothing is silently split either.
+- If a catalog previously routed different notifications to different areas,
+  it now targets the union of all of them. Split it into one catalog per
+  area afterward, using **Edit targets** on the new catalog and each
+  original notification's targets as a guide.
+- If a catalog referenced more than one reusable group with *different*
+  Zigbee2MQTT groups set, the migrated catalog's Zigbee2MQTT group is left
+  blank rather than picking one arbitrarily — re-set it per catalog after
+  splitting.
+- Existing entity unique IDs and notification slugs remain unchanged.
 
 ## Upgrading to 0.8.0
 
