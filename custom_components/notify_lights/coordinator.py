@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 
 from .active_set import ActiveEntry, compute_active_set
@@ -61,7 +61,9 @@ class NotifyLightsCoordinator:
         # its on/off/color/effect mirror whichever of its own notifications
         # is currently top priority.
         self._entry_active: dict[str, list[tuple[Notification, float]]] = {}
-        self._entry_listeners: dict[str, list[Callable[[], None]]] = {}
+        self._entry_listeners: dict[
+            str, list[Callable[[], Awaitable[None] | None]]
+        ] = {}
         self._ceilings: dict[str, int] = {}
 
     def register_transport_groups(
@@ -130,6 +132,13 @@ class NotifyLightsCoordinator:
             len(targets),
             targets,
         )
+        # Announce on the entry first. Its light entity turns itself on through
+        # a real `light.turn_on`, which is what gives Adaptive Lighting a chance
+        # to set the ceiling. Do that before the stacks change so the render
+        # below is the first one, and already at the adapted brightness.
+        await self._async_set_entry_notification(
+            pool_entry_id, notification, activated_at
+        )
         changed_targets = set(targets)
         for target in changed_targets:
             stack = self._stacks.setdefault(target, [])
@@ -141,7 +150,6 @@ class NotifyLightsCoordinator:
                 if not (n.name == notification.name and pid == pool_entry_id)
             ]
             stack.append((notification, pool_entry_id, activated_at))
-        self._set_entry_notification(pool_entry_id, notification, activated_at)
         await self._render_targets(changed_targets)
 
     async def async_deactivate(
@@ -163,7 +171,7 @@ class NotifyLightsCoordinator:
                 for n, pid, t in stack
                 if not (n.name == notification.name and pid == pool_entry_id)
             ]
-        self._clear_entry_notification(pool_entry_id, notification)
+        await self._async_clear_entry_notification(pool_entry_id, notification)
         await self._render_targets(changed_targets)
 
     async def async_deactivate_entry(self, pool_entry_id: str) -> None:
@@ -198,7 +206,7 @@ class NotifyLightsCoordinator:
             pool_entry_id,
             len(changed_targets),
         )
-        self._notify_entry_listeners(pool_entry_id)
+        await self._async_notify_entry_listeners(pool_entry_id)
         await self._render_targets(changed_targets)
 
     def _remove_entry_from_stacks(self, pool_entry_id: str) -> set[str]:
@@ -211,16 +219,16 @@ class NotifyLightsCoordinator:
                 changed_targets.add(target)
         return changed_targets
 
-    def _set_entry_notification(
+    async def _async_set_entry_notification(
         self, pool_entry_id: str, notification: Notification, activated_at: float
     ) -> None:
         """Track one entry's own active notification and notify listeners."""
         entries = self._entry_active.setdefault(pool_entry_id, [])
         entries[:] = [(n, t) for n, t in entries if n.name != notification.name]
         entries.append((notification, activated_at))
-        self._notify_entry_listeners(pool_entry_id)
+        await self._async_notify_entry_listeners(pool_entry_id)
 
-    def _clear_entry_notification(
+    async def _async_clear_entry_notification(
         self, pool_entry_id: str, notification: Notification
     ) -> None:
         """Stop tracking one entry's notification and notify listeners."""
@@ -228,18 +236,27 @@ class NotifyLightsCoordinator:
         if entries is None:
             return
         entries[:] = [(n, t) for n, t in entries if n.name != notification.name]
-        self._notify_entry_listeners(pool_entry_id)
+        await self._async_notify_entry_listeners(pool_entry_id)
 
-    def _notify_entry_listeners(self, pool_entry_id: str) -> None:
+    async def _async_notify_entry_listeners(self, pool_entry_id: str) -> None:
+        """Run each entry listener, awaiting the ones that return a coroutine.
+
+        The light entity's listener turns itself on through the `light.turn_on`
+        service, so activation has to be able to wait for it.
+        """
         for listener in list(self._entry_listeners.get(pool_entry_id, [])):
-            listener()
+            result = listener()
+            if result is not None:
+                await result
 
     def entry_active_set(self, pool_entry_id: str) -> list[ActiveEntry]:
         """Return one config entry's own notifications, priority-resolved."""
         return compute_active_set(self._entry_active.get(pool_entry_id, []))
 
     def async_add_entry_listener(
-        self, pool_entry_id: str, listener: Callable[[], None]
+        self,
+        pool_entry_id: str,
+        listener: Callable[[], Awaitable[None] | None],
     ) -> Callable[[], None]:
         """Subscribe to changes in one entry's active notifications.
 

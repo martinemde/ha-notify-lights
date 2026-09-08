@@ -21,6 +21,8 @@ from homeassistant.components.light import (
     LightEntity,
     LightEntityFeature,
 )
+from homeassistant.components.light import DOMAIN as LIGHT_DOMAIN
+from homeassistant.const import ATTR_ENTITY_ID, SERVICE_TURN_ON
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.restore_state import RestoreEntity
 
@@ -60,6 +62,7 @@ class NotifyLightsGroupLight(LightEntity, RestoreEntity):
         self._entry_id = entry.entry_id
         self._targets = targets
         self._unsubscribe = None
+        self._announced_on = False
         self._attr_unique_id = f"notify_lights_{entry.entry_id}_brightness"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
@@ -106,9 +109,37 @@ class NotifyLightsGroupLight(LightEntity, RestoreEntity):
         )
         self.async_on_remove(self._unsubscribe)
 
-    def _handle_active_changed(self) -> None:
-        """Refresh state whenever this entry's active notification changes."""
+    def _handle_active_changed(self):
+        """Refresh state whenever this entry's active notification changes.
+
+        Going from dark to lit is announced as a real `light.turn_on` service
+        call on ourselves rather than a bare state write. Adaptive Lighting
+        adapts a light only when its `off` -> `on` state change carries the
+        context of a tracked `light.turn_on`; a state write alone looks like an
+        external turn-on, which AL marks as manually controlled and then leaves
+        alone. Returning the coroutine lets the coordinator await it, so the
+        ceiling AL injects is in place before the first render. The state stays
+        `off` until the call lands -- AL skips lights that already read `on`.
+        """
+        if self.is_on and not self._announced_on:
+            return self._async_announce_turn_on()
+        self._announced_on = self.is_on
         self.async_write_ha_state()
+        return None
+
+    async def _async_announce_turn_on(self) -> None:
+        """Turn ourselves on through the light service, bare of any attributes.
+
+        Bare matters: AL skips any `light.turn_on` carrying an effect, and with
+        `adapt_only_on_bare_turn_on` it marks whatever attributes the call names
+        as manually controlled instead of adapting them.
+        """
+        await self.hass.services.async_call(
+            LIGHT_DOMAIN,
+            SERVICE_TURN_ON,
+            {ATTR_ENTITY_ID: self.entity_id},
+            blocking=True,
+        )
 
     async def async_turn_on(self, **kwargs) -> None:
         brightness = kwargs.get(ATTR_BRIGHTNESS, self.brightness or 255)
@@ -116,6 +147,7 @@ class NotifyLightsGroupLight(LightEntity, RestoreEntity):
             "Setting brightness ceiling for entry %s to %d", self._entry_id, brightness
         )
         await self._coordinator.async_set_ceiling(self._entry_id, brightness)
+        self._announced_on = self.is_on
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs) -> None:
@@ -130,4 +162,5 @@ class NotifyLightsGroupLight(LightEntity, RestoreEntity):
         )
         await self._coordinator.async_clear_entry_notifications(self._entry_id)
         await self._coordinator.async_set_ceiling(self._entry_id, 0)
+        self._announced_on = False
         self.async_write_ha_state()

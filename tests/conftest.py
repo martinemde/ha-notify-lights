@@ -92,6 +92,8 @@ _const_module = types.ModuleType("homeassistant.const")
 _const_module.STATE_ON = "on"
 _const_module.STATE_UNKNOWN = "unknown"
 _const_module.STATE_UNAVAILABLE = "unavailable"
+_const_module.ATTR_ENTITY_ID = "entity_id"
+_const_module.SERVICE_TURN_ON = "turn_on"
 sys.modules["homeassistant.const"] = _const_module
 
 # Stub voluptuous (used by config_flow for form schemas)
@@ -249,6 +251,7 @@ _light_module.ColorMode = _ColorMode
 _light_module.LightEntity = _LightEntity
 _light_module.LightEntityFeature = _LightEntityFeature
 _light_module.ATTR_BRIGHTNESS = "brightness"
+_light_module.DOMAIN = "light"
 sys.modules["homeassistant.components.light"] = _light_module
 
 # Restore-state mixin stub

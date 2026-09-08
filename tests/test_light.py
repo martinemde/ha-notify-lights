@@ -66,6 +66,28 @@ def _make_coordinator():
     return NotifyLightsCoordinator(hass, registry, entity_registry, device_registry)
 
 
+def _wire_hass(light, adapt_brightness=None):
+    """Give a light a hass whose light.turn_on routes back into the entity.
+
+    Passing `adapt_brightness` stands in for Adaptive Lighting's service-call
+    interceptor, which injects its adapted brightness into the call's data
+    before the entity ever sees it.
+    """
+    calls = []
+
+    async def _async_call(domain, service, data, blocking=False):
+        calls.append((domain, service, dict(data)))
+        params = {k: v for k, v in data.items() if k != "entity_id"}
+        if adapt_brightness is not None:
+            params["brightness"] = adapt_brightness
+        await light.async_turn_on(**params)
+
+    light.hass = MagicMock()
+    light.hass.services.async_call = _async_call
+    light.entity_id = "light.test_pool_brightness"
+    return calls
+
+
 def test_unique_id_includes_entry_id():
     light = NotifyLightsGroupLight(_make_coordinator(), _make_entry(), TARGETS)
     assert light.unique_id == f"notify_lights_{ENTRY_ID}_brightness"
@@ -234,6 +256,7 @@ async def test_listener_triggers_state_write_on_activate():
     coordinator = _make_coordinator()
     light = NotifyLightsGroupLight(coordinator, _make_entry(), TARGETS)
     light.async_get_last_state = _no_previous_state
+    _wire_hass(light)
     writes = []
     light.async_write_ha_state = lambda: writes.append(1)
 
@@ -241,6 +264,56 @@ async def test_listener_triggers_state_write_on_activate():
     await coordinator.async_activate(_make_notif(), TARGETS, ENTRY_ID)
 
     assert writes
+
+
+@pytest.mark.asyncio
+async def test_activating_turns_itself_on_through_the_light_service():
+    """Adaptive Lighting only adapts an 'off' -> 'on' it can tie to turn_on."""
+    coordinator = _make_coordinator()
+    light = NotifyLightsGroupLight(coordinator, _make_entry(), TARGETS)
+    light.async_get_last_state = _no_previous_state
+    calls = _wire_hass(light)
+
+    await light.async_added_to_hass()
+    await coordinator.async_activate(_make_notif(), TARGETS, ENTRY_ID)
+
+    assert calls == [("light", "turn_on", {"entity_id": light.entity_id})]
+
+
+@pytest.mark.asyncio
+async def test_only_the_first_notification_announces_a_turn_on():
+    coordinator = _make_coordinator()
+    light = NotifyLightsGroupLight(coordinator, _make_entry(), TARGETS)
+    light.async_get_last_state = _no_previous_state
+    calls = _wire_hass(light)
+
+    await light.async_added_to_hass()
+    await coordinator.async_activate(_make_notif(name="first"), TARGETS, ENTRY_ID)
+    await coordinator.async_activate(_make_notif(name="second"), TARGETS, ENTRY_ID)
+
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_adapted_brightness_lands_before_the_first_render():
+    """The ceiling injected into the turn_on scales the very first render."""
+    coordinator = _make_coordinator()
+    light = NotifyLightsGroupLight(coordinator, _make_entry(), TARGETS)
+    light.async_get_last_state = _no_previous_state
+    _wire_hass(light, adapt_brightness=51)
+
+    renders = []
+    adapter = coordinator._adapter_registry.get_adapter("Inovelli", "VZM31-SN")
+
+    async def _record(target, active):
+        renders.append([n.brightness for n, _ in active])
+
+    adapter.render = _record
+
+    await light.async_added_to_hass()
+    await coordinator.async_activate(_make_notif(), TARGETS, ENTRY_ID)
+
+    assert renders == [[round(100 * 51 / 255)]]
 
 
 @pytest.mark.asyncio
