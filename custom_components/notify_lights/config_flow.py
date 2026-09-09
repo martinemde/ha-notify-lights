@@ -5,6 +5,11 @@ group or a set of physical Inovelli devices. It is editable afterward under
 "Edit notification lights". Every notification rule inside it shares that
 target set -- there is nothing to route per rule.
 
+What a notification looks like -- color, brightness, effect and speed -- is
+not asked for here. Each rule gets a light entity in the catalog device's
+configuration section that carries those settings live, so they can be
+adjusted against the real switch instead of guessed at in a form.
+
 Activation is selected explicitly. Duration is never used as a hidden type
 switch in the UI, even though the compact stored/runtime model still represents
 "while" rules with duration zero and timed rules with a positive duration.
@@ -31,10 +36,11 @@ from . import resolve_entry_targets
 from .adapters.inovelli_blue_z2m import InovelliBlueZ2MAdapter
 from .const import (
     DEFAULT_BRIGHTNESS,
+    DEFAULT_COLOR,
+    DEFAULT_EFFECT,
     DEFAULT_PRIORITY,
     DEFAULT_SPEED,
     DOMAIN,
-    NAMED_COLORS,
     Activation,
     DisplayMode,
     Effect,
@@ -49,18 +55,6 @@ from .z2m_groups import (
 
 _LOGGER = logging.getLogger(__name__)
 
-COLOR_OPTIONS = [
-    selector.SelectOptionDict(value=name, label=name.capitalize())
-    for name in NAMED_COLORS
-]
-EFFECT_OPTIONS = [
-    selector.SelectOptionDict(value=effect.value, label=effect.value.capitalize())
-    for effect in Effect
-]
-SPEED_OPTIONS = [
-    selector.SelectOptionDict(value=speed.value, label=speed.value.capitalize())
-    for speed in Speed
-]
 ACTIVATION_OPTIONS = [
     selector.SelectOptionDict(
         value=Activation.STATE_WHILE,
@@ -213,10 +207,12 @@ def notification_config(slug: str, draft: dict[str, Any]) -> dict[str, Any]:
         "display_name": draft["name"],
         "description": draft.get("description", ""),
         "activation": activation.value,
-        "color": draft["color"],
-        "effect": draft["effect"],
-        "effect_speed": draft["effect_speed"],
-        "brightness": int(draft["brightness"]),
+        # Appearance is owned by the rule's light entity, which writes it
+        # back here. The flow only seeds it for a brand new rule.
+        "color": draft.get("color", DEFAULT_COLOR),
+        "effect": Effect(draft.get("effect", DEFAULT_EFFECT)).value,
+        "effect_speed": Speed(draft.get("effect_speed", DEFAULT_SPEED)).value,
+        "brightness": int(draft.get("brightness", DEFAULT_BRIGHTNESS)),
         "duration": int(draft.get("duration", 300)) if is_timed else 0,
         "priority": int(draft["priority"]),
         "state_entity": draft.get("state_entity") if uses_source else None,
@@ -362,47 +358,15 @@ def _notification_details_schema(
     hass,
     draft: dict[str, Any],
 ) -> vol.Schema:
-    """Build the appearance step for a notification rule.
+    """Build the arbitration step for a notification rule.
 
     Routing is decided once for the whole catalog (see `_targets_schema`),
-    so this step is purely about what the notification looks like.
+    and appearance is set on the rule's own light entity, where it can be
+    seen on the wall while it is chosen. What is left here is how the rule
+    competes with other rules and how long it lasts.
     """
     activation = Activation(draft["activation"])
     fields: dict[Any, Any] = {
-        vol.Required(
-            "color", default=draft.get("color", "blue")
-        ): selector.SelectSelector(
-            selector.SelectSelectorConfig(
-                options=COLOR_OPTIONS,
-                mode=selector.SelectSelectorMode.DROPDOWN,
-            )
-        ),
-        vol.Required(
-            "effect", default=draft.get("effect", Effect.SOLID)
-        ): selector.SelectSelector(
-            selector.SelectSelectorConfig(
-                options=EFFECT_OPTIONS,
-                mode=selector.SelectSelectorMode.DROPDOWN,
-            )
-        ),
-        vol.Required(
-            "effect_speed", default=draft.get("effect_speed", DEFAULT_SPEED)
-        ): selector.SelectSelector(
-            selector.SelectSelectorConfig(
-                options=SPEED_OPTIONS,
-                mode=selector.SelectSelectorMode.DROPDOWN,
-            )
-        ),
-        vol.Required(
-            "brightness", default=draft.get("brightness", DEFAULT_BRIGHTNESS)
-        ): selector.NumberSelector(
-            selector.NumberSelectorConfig(
-                min=0,
-                max=100,
-                step=1,
-                mode=selector.NumberSelectorMode.SLIDER,
-            )
-        ),
         vol.Required(
             "priority", default=draft.get("priority", DEFAULT_PRIORITY)
         ): selector.NumberSelector(

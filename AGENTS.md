@@ -43,16 +43,16 @@ jq -c '[.data.entities[] | select(.platform == "notify_lights")]' \
   /config/.storage/core.entity_registry
 ```
 
-Before pressing a notification button, inspect its live `targets` attribute.
-An empty list means the integration resolved no supported devices and pressing
-it cannot display anything. Use the Core API to press a known momentary button:
+Before turning a notification on, inspect its light's live `targets`
+attribute. An empty list means the integration resolved no supported devices
+and turning it on cannot display anything. Use the Core API to fire one:
 
 ```console
 curl -fsS \
   -H "Authorization: Bearer $SUPERVISOR_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"entity_id":"button.great_room_desk_notify_lights_cardiff_dinnertime"}' \
-  http://supervisor/core/api/services/button/press
+  -d '{"entity_id":"light.great_room_desk_notify_lights_cardiff_dinnertime"}' \
+  http://supervisor/core/api/services/light/turn_on
 ```
 
 Prefer short-duration, single-device notifications for initial live tests.

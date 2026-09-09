@@ -33,16 +33,16 @@ automatically falls back to rendering those switches individually. Older
 non-Zigbee group/area/entity selectors are expanded to physical devices when
 opened.
 
-### Notification rules answer “when and what?”
+### Notification rules answer “when?”
 
 Every rule has an explicit activation behavior:
 
-| Behavior | Resulting HA entity | Use it for |
-|---|---|---|
-| Show while an entity is in a state | Binary sensor | Charging, unlocked, door open, heating/cooling, occupied |
-| Show for a time when an entity enters a state | Binary sensor with timer | Charger ready, package delivered |
-| Manual, stays on until turned off | Switch | Conditions controlled by an existing automation |
-| Manual, turns off after a time | Button | Impulses controlled by an existing automation |
+| Behavior | Use it for |
+|---|---|
+| Show while an entity is in a state | Charging, unlocked, door open, heating/cooling, occupied |
+| Show for a time when an entity enters a state | Charger ready, package delivered |
+| Manual, stays on until turned off | Conditions controlled by an existing automation |
+| Manual, turns off after a time | Impulses controlled by an existing automation |
 
 There is no hidden “duration 0 changes the entity type” choice in the UI. Timed
 rules ask for a duration; while-active rules do not.
@@ -53,10 +53,37 @@ there is no need to create an intermediate template sensor. Notify Lights
 offers values reported by the chosen property (including enum options when
 available), while still allowing a custom value.
 
-Each rule chooses its color/effect/brightness/priority. Coverage is an
-explicit choice between the full light bar and a one-pixel bottom indicator.
-Where it shows is decided once, for the whole catalog, under **Edit notification
-lights**.
+The rule form asks only for priority and coverage — how the rule competes with
+other rules, and whether it wants the full light bar or a one-pixel bottom
+indicator. Where it shows is decided once, for the whole catalog, under
+**Edit notification lights**.
+
+### Every rule is a light
+
+Each notification rule gets its own light entity, in the catalog device's
+**Configuration** section. That light *is* the rule's appearance: its
+brightness, color, and effect are the settings the notification renders with,
+so changing them changes what the notification displays everywhere it
+displays. They are set on the wall, against the real switch, rather than
+guessed at in a form — and they are written straight back into the catalog,
+without reloading it.
+
+- Turning one on activates the notification by hand. Turning several on
+  stacks them by priority, exactly as automatic activation does.
+- Turning one off clears it, including a rule whose source entity is still
+  active — an individual notification can be dismissed.
+- A rule bound to a source entity follows that source, and re-syncs the next
+  time the source changes state.
+- A timed rule turns itself off when its duration runs out.
+- Effect and speed are one Home Assistant effect name: `blink fast`,
+  `chase slow`. Effects with nothing to vary are bare — `solid`, `pulse`,
+  `aurora`, each a single value in the Zigbee2MQTT enum.
+- Dragging saturation to zero asks for white, which is off the hue wheel.
+
+Each light is named with its priority first — `085 Fridge ajar` — so the
+configuration section reads in priority order and a re-prioritized rule visibly
+moves. The priority is display only: it never enters the entity ID, so
+changing it breaks no references.
 
 ## Tesla example
 
@@ -100,7 +127,8 @@ appearance and timeout. That keeps priority arbitration and testing simple.
 ## Dimming notifications at night
 
 Every catalog gets a companion light entity (`light.<catalog>_brightness`)
-alongside its switches, buttons, and binary sensors. Its on/off, color, and
+alongside its notification lights. Unlike those, it is a control, not
+configuration. Its on/off, color, and
 effect are a read-only mirror of whichever of that catalog's own
 notifications is currently highest priority — there's nothing to command
 there. Its **brightness** is the opposite: a live ceiling that scales every
@@ -168,21 +196,36 @@ payloads.
 
 ## Calling manual rules
 
-Manual rules remain ordinary Home Assistant entities:
+Manual rules are ordinary lights:
 
-    # Manual, stays on
-    - action: switch.turn_on
+    # Manual, stays on until turned off
+    - action: light.turn_on
       target:
-        entity_id: switch.notify_lights_fridge_ajar
+        entity_id: light.common_alerts_fridge_ajar
 
-    # Manual, timed
-    - action: button.press
+    # Manual, clears itself after the rule's duration
+    - action: light.turn_on
       target:
-        entity_id: button.notify_lights_package_at_door
+        entity_id: light.common_alerts_package_at_door
 
-Automatic rules need no calling automation. Their binary sensors expose the
-source, matching state, duration, priority, and resolved physical targets as
-attributes.
+Automatic rules need no calling automation. Every rule's light exposes its
+description, activation, source, matching state, duration, priority, coverage,
+and resolved physical targets as attributes.
+
+## Upgrading to 0.10.0
+
+Every notification rule is now one light entity instead of a switch, a button,
+or a binary sensor:
+
+- The switch, button, and binary sensor entities are removed from the entity
+  registry on first setup. Automations that called `switch.turn_on` or
+  `button.press` on a rule must call `light.turn_on` on its light instead.
+- Color, brightness, effect, and speed are no longer asked for in the options
+  flow. Existing values carry over untouched and are now edited on each rule's
+  light. New rules start blue, solid, medium, full brightness.
+- Nothing else about a catalog changes: config version stays at 4, and
+  notification slugs, priorities, sources, durations, and targets are
+  untouched.
 
 ## Upgrading to 0.9.3
 

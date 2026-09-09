@@ -8,6 +8,7 @@ from custom_components.notify_lights import (
     _pending_native_group_entities,
     async_migrate_entry,
     notifications_from_options,
+    only_appearance_changed,
     resolve_entry_targets,
     targets_from_options,
     transport_groups_from_options,
@@ -539,3 +540,50 @@ async def test_migration_blanks_zigbee2mqtt_group_when_groups_disagree():
     _, kwargs = hass.config_entries.async_update_entry.call_args
     assert kwargs["options"]["zigbee2mqtt_group"] == ""
     assert set(kwargs["options"]["targets"]["entity_id"]) == {"light.a", "light.b"}
+
+
+# --- restyling vs. reconfiguring -------------------------------------------
+
+
+def _options(**overrides):
+    notification = {
+        "slug": "fridge_ajar",
+        "display_name": "Fridge ajar",
+        "activation": "manual_while",
+        "color": 21,
+        "brightness": 100,
+        "effect": "pulse",
+        "effect_speed": "medium",
+        "duration": 0,
+        "priority": 75,
+        "display_mode": "full",
+    }
+    notification.update(overrides)
+    return {
+        "targets": {"area_id": ["kitchen"]},
+        "exclude": {},
+        "zigbee2mqtt_group": "",
+        "notifications": {"fridge_ajar": notification},
+    }
+
+
+def test_a_restyled_notification_does_not_reload_the_catalog():
+    assert only_appearance_changed(
+        _options(), _options(color=240, effect="blink", effect_speed="fast")
+    )
+
+
+def test_a_reprioritized_notification_reloads_the_catalog():
+    assert not only_appearance_changed(_options(), _options(priority=20))
+
+
+def test_a_new_notification_reloads_the_catalog():
+    changed = _options()
+    changed["notifications"]["heating"] = dict(changed["notifications"]["fridge_ajar"])
+    assert not only_appearance_changed(_options(), changed)
+
+
+def test_retargeting_the_catalog_reloads_it():
+    changed = _options()
+    changed["targets"] = {"area_id": ["kitchen", "pantry"]}
+    assert not only_appearance_changed(_options(), changed)

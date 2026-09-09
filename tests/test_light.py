@@ -341,7 +341,7 @@ def _return(value):
 
 
 @pytest.mark.asyncio
-async def test_setup_entry_creates_one_light_per_entry():
+async def test_setup_entry_creates_the_catalog_light():
     from custom_components.notify_lights import light as light_mod
     from custom_components.notify_lights.const import DOMAIN
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -27,14 +28,26 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by the preview CLI
 
 from .adapter import AdapterRegistry
 from .adapters.inovelli_blue_z2m import InovelliBlueZ2MAdapter
-from .const import DOMAIN, NAMED_COLORS, DisplayMode, Effect, Speed
+from .const import (
+    APPEARANCE_FIELDS,
+    DOMAIN,
+    NAMED_COLORS,
+    DisplayMode,
+    Effect,
+    Speed,
+)
 from .coordinator import NotifyLightsCoordinator, TransportGroup
 from .notification import Notification
 from .z2m_groups import async_groups_for_devices, group_devices_from_targets
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["switch", "button", "binary_sensor", "light"]
+PLATFORMS = ["light"]
+
+# Every notification used to be a switch, a button or a binary sensor
+# depending on how it activated. They are all lights now; these are the
+# entity registry rows left behind by an upgrade.
+LEGACY_PLATFORMS = frozenset({"switch", "button", "binary_sensor"})
 
 
 def _get_or_create_coordinator(hass: HomeAssistant) -> NotifyLightsCoordinator:
@@ -210,8 +223,8 @@ def targets_from_options(hass: HomeAssistant, options: dict) -> dict[str, list[s
     """Resolve the catalog's targets, keyed by notification slug.
 
     Every notification in a catalog shares one target set, so every value
-    here is the same list -- keyed by slug only because switch/button/
-    binary_sensor setup already expects that shape.
+    here is the same list -- keyed by slug only because light platform setup
+    hands each notification its own targets.
     """
     entry_targets = resolve_entry_targets(hass, options)
     return {slug: entry_targets for slug in options.get("notifications", {})}
@@ -457,6 +470,44 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+def _structure(options: dict) -> dict:
+    """Return everything about a catalog except how its rules look."""
+    return {
+        **{key: value for key, value in options.items() if key != "notifications"},
+        "notifications": {
+            slug: {
+                field: value
+                for field, value in config.items()
+                if field not in APPEARANCE_FIELDS
+            }
+            for slug, config in options.get("notifications", {}).items()
+        },
+    }
+
+
+def only_appearance_changed(old: dict, new: dict) -> bool:
+    """True when two option sets differ only in what notifications look like.
+
+    Each notification's light entity writes its color, brightness and effect
+    straight back into the catalog's options. Reloading the whole entry for
+    that would tear down every entity mid-adjustment, so an appearance-only
+    write is applied in place instead.
+    """
+    return _structure(old) == _structure(new)
+
+
+def _remove_legacy_entities(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Delete the switch/button/binary sensor rows an upgrade orphaned."""
+    registry = er.async_get(hass)
+    for registry_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
+        if registry_entry.domain in LEGACY_PLATFORMS:
+            _LOGGER.info(
+                "Removing %s, replaced by a notification light",
+                registry_entry.entity_id,
+            )
+            registry.async_remove(registry_entry.entity_id)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.info("Setting up entry %s (%s)", entry.entry_id, entry.data.get("name"))
 
@@ -513,8 +564,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "notifications": notifications,
         "targets": targets,
         "entry_targets": entry_targets,
+        # What the entities were built from, so an appearance-only write
+        # back from a notification light can be told apart from a real edit.
+        "options": deepcopy(dict(entry.options)),
     }
 
+    _remove_legacy_entities(hass, entry)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
@@ -566,6 +621,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if data is not None and only_appearance_changed(data["options"], entry.options):
+        _LOGGER.debug(
+            "Catalog %s restyled a notification; keeping entities in place",
+            entry.entry_id,
+        )
+        data["options"] = deepcopy(dict(entry.options))
+        data["notifications"] = notifications_from_options(entry.options)
+        return
     _LOGGER.info("Options updated for catalog %s, reloading", entry.entry_id)
     await hass.config_entries.async_reload(entry.entry_id)
 

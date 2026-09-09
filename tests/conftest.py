@@ -94,6 +94,14 @@ _const_module.STATE_UNKNOWN = "unknown"
 _const_module.STATE_UNAVAILABLE = "unavailable"
 _const_module.ATTR_ENTITY_ID = "entity_id"
 _const_module.SERVICE_TURN_ON = "turn_on"
+
+
+class _EntityCategory:
+    CONFIG = "config"
+    DIAGNOSTIC = "diagnostic"
+
+
+_const_module.EntityCategory = _EntityCategory
 sys.modules["homeassistant.const"] = _const_module
 
 # Stub voluptuous (used by config_flow for form schemas)
@@ -104,89 +112,9 @@ if "voluptuous" not in sys.modules:
     _vol.Optional = MagicMock(side_effect=lambda key, **kw: key)
     sys.modules["voluptuous"] = _vol
 
-# Switch entity stub
-_switch_module = types.ModuleType("homeassistant.components.switch")
-
-
-class _SwitchEntity:
-    _attr_unique_id = None
-    _attr_name = None
-    _attr_has_entity_name = False
-
-    @property
-    def unique_id(self):
-        return self._attr_unique_id
-
-    @property
-    def name(self):
-        return self._attr_name
-
-
-_switch_module.SwitchEntity = _SwitchEntity
 sys.modules.setdefault(
     "homeassistant.components", types.ModuleType("homeassistant.components")
 )
-sys.modules["homeassistant.components.switch"] = _switch_module
-
-# Binary sensor entity stub
-_binary_sensor_module = types.ModuleType("homeassistant.components.binary_sensor")
-
-
-class _BinarySensorEntity:
-    _attr_unique_id = None
-    _attr_name = None
-    _attr_is_on = None
-    _attr_available = True
-
-    @property
-    def unique_id(self):
-        return self._attr_unique_id
-
-    @property
-    def name(self):
-        return self._attr_name
-
-    @property
-    def is_on(self):
-        return self._attr_is_on
-
-    @property
-    def available(self):
-        return self._attr_available
-
-    async def async_added_to_hass(self):
-        pass
-
-    def async_on_remove(self, callback):
-        self._remove_callback = callback
-
-    def async_write_ha_state(self):
-        pass
-
-
-_binary_sensor_module.BinarySensorEntity = _BinarySensorEntity
-sys.modules["homeassistant.components.binary_sensor"] = _binary_sensor_module
-
-# Button entity stub
-_button_module = types.ModuleType("homeassistant.components.button")
-
-
-class _ButtonEntity:
-    _attr_unique_id = None
-    _attr_name = None
-    _attr_has_entity_name = False
-
-    @property
-    def unique_id(self):
-        return self._attr_unique_id
-
-    @property
-    def name(self):
-        return self._attr_name
-
-
-_button_module.ButtonEntity = _ButtonEntity
-sys.modules["homeassistant.components.button"] = _button_module
 
 # Event helpers stub
 _event_module = types.ModuleType("homeassistant.helpers.event")
@@ -224,6 +152,7 @@ class _LightEntity:
     _attr_unique_id = None
     _attr_name = None
     _attr_has_entity_name = False
+    _attr_entity_category = None
     _attr_supported_color_modes: set = set()
     _attr_color_mode = None
     _attr_supported_features = 0
@@ -236,6 +165,10 @@ class _LightEntity:
     @property
     def name(self):
         return self._attr_name
+
+    @property
+    def entity_category(self):
+        return self._attr_entity_category
 
     async def async_added_to_hass(self):
         pass
@@ -251,6 +184,8 @@ _light_module.ColorMode = _ColorMode
 _light_module.LightEntity = _LightEntity
 _light_module.LightEntityFeature = _LightEntityFeature
 _light_module.ATTR_BRIGHTNESS = "brightness"
+_light_module.ATTR_HS_COLOR = "hs_color"
+_light_module.ATTR_EFFECT = "effect"
 _light_module.DOMAIN = "light"
 sys.modules["homeassistant.components.light"] = _light_module
 

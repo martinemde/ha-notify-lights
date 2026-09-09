@@ -4,8 +4,8 @@
 
 Working integration with:
 - Options flow to add/remove notifications via Configure button
-- Switch entities for stateful notifications (duration=0)
-- Button entities for momentary notifications (duration>0)
+- One light entity per notification, in the catalog device's configuration
+  section, carrying that notification's color, brightness, and effect
 - Inovelli Blue Z2M adapter (MQTT publish to Zigbee2MQTT)
 - Priority-based active set ordering
 - Two-layer Inovelli Blue rendering via `individual_led_effect`

@@ -7,8 +7,7 @@ from custom_components.notify_lights.coordinator import NotifyLightsCoordinator
 from custom_components.notify_lights.adapter import AdapterRegistry, NotificationAdapter
 from custom_components.notify_lights.notification import Notification
 from custom_components.notify_lights.const import Effect, Speed, DOMAIN
-from custom_components.notify_lights.switch import NotificationSwitch
-from custom_components.notify_lights.button import NotificationButton
+from custom_components.notify_lights.light import NotificationLight
 
 
 class MockAdapter(NotificationAdapter):
@@ -55,9 +54,15 @@ def _make_registries(device_name="office_dimmer"):
     return entity_registry, device_registry
 
 
+def _make_light(coordinator, notification, targets, entry, hass):
+    light = NotificationLight(coordinator, notification, targets, entry)
+    light.hass = hass
+    return light
+
+
 @pytest.mark.asyncio
-async def test_switch_round_trip():
-    """Full round-trip: switch on -> adapter renders -> switch off -> adapter clears."""
+async def test_notification_light_round_trip():
+    """Full round-trip: light on -> adapter renders -> light off -> adapter clears."""
     hass = MagicMock()
     hass.states.get.return_value = None
     entity_reg, device_reg = _make_registries("office_dimmer")
@@ -78,18 +83,18 @@ async def test_switch_round_trip():
     )
 
     entry = _make_entry(POOL_A)
-    switch = NotificationSwitch(coordinator, notif, TARGETS, entry)
+    light = _make_light(coordinator, notif, TARGETS, entry, hass)
 
-    await switch.async_turn_on()
-    assert switch.is_on is True
+    await light.async_turn_on()
+    assert light.is_on is True
     assert len(adapter.render_calls) == 1
     target, active = adapter.render_calls[0]
     assert target == "office_dimmer"
     assert len(active) == 1
     assert active[0][0].name == "heating"
 
-    await switch.async_turn_off()
-    assert switch.is_on is False
+    await light.async_turn_off()
+    assert light.is_on is False
     assert len(adapter.render_calls) == 2
     target, active = adapter.render_calls[1]
     assert target == "office_dimmer"
@@ -97,8 +102,8 @@ async def test_switch_round_trip():
 
 
 @pytest.mark.asyncio
-async def test_button_activates_and_schedules_deactivation():
-    """Button press -> adapter renders -> timer fires -> adapter clears."""
+async def test_timed_notification_light_clears_itself():
+    """Light on -> adapter renders -> timer fires -> adapter clears."""
     hass = MagicMock()
     hass.states.get.return_value = None
     entity_reg, device_reg = _make_registries("kitchen_switch")
@@ -128,13 +133,13 @@ async def test_button_activates_and_schedules_deactivation():
         return MagicMock()
 
     entry = _make_entry(POOL_A)
-    button = NotificationButton(coordinator, notif, targets, entry, hass)
+    light = _make_light(coordinator, notif, targets, entry, hass)
 
     with patch(
-        "custom_components.notify_lights.button.async_call_later",
+        "custom_components.notify_lights.light.async_call_later",
         side_effect=fake_call_later,
     ):
-        await button.async_press()
+        await light.async_turn_on()
 
     assert len(adapter.render_calls) == 1
     target, active = adapter.render_calls[0]
@@ -183,17 +188,17 @@ async def test_cross_pool_priority_on_shared_switch():
 
     entry_a = _make_entry(POOL_A)
     entry_b = _make_entry(POOL_B)
-    switch_low = NotificationSwitch(coordinator, low, TARGETS, entry_a)
-    switch_high = NotificationSwitch(coordinator, high, TARGETS, entry_b)
+    light_low = _make_light(coordinator, low, TARGETS, entry_a, hass)
+    light_high = _make_light(coordinator, high, TARGETS, entry_b, hass)
 
-    await switch_low.async_turn_on()
-    await switch_high.async_turn_on()
+    await light_low.async_turn_on()
+    await light_high.async_turn_on()
 
     target, active = adapter.render_calls[-1]
     assert active[0][0].name == "urgent_alert"
     assert active[1][0].name == "background"
 
-    await switch_high.async_turn_off()
+    await light_high.async_turn_off()
     target, active = adapter.render_calls[-1]
     assert len(active) == 1
     assert active[0][0].name == "background"
@@ -223,15 +228,15 @@ async def test_same_notification_different_pools_independent():
 
     entry_a = _make_entry(POOL_A)
     entry_b = _make_entry(POOL_B)
-    switch_a = NotificationSwitch(coordinator, notif, TARGETS, entry_a)
-    switch_b = NotificationSwitch(coordinator, notif, TARGETS, entry_b)
+    light_a = _make_light(coordinator, notif, TARGETS, entry_a, hass)
+    light_b = _make_light(coordinator, notif, TARGETS, entry_b, hass)
 
-    await switch_a.async_turn_on()
-    await switch_b.async_turn_on()
+    await light_a.async_turn_on()
+    await light_b.async_turn_on()
 
     target, active = adapter.render_calls[-1]
     assert len(active) == 2
 
-    await switch_a.async_turn_off()
+    await light_a.async_turn_off()
     target, active = adapter.render_calls[-1]
     assert len(active) == 1

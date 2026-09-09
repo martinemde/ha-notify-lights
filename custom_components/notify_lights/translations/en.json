@@ -21,7 +21,7 @@
     "step": {
       "init": {
         "title": "Notify Lights",
-        "description": "The notification lights answer **where** a notification appears. Notification rules answer **when** it appears and **what** it looks like.",
+        "description": "The notification lights answer **where** a notification appears. Notification rules answer **when** it appears. What each one looks like is set on its own light, in this device's configuration section.",
         "menu_options": {
           "edit_targets": "Edit notification lights",
           "add_notification": "Add notification rule",
@@ -38,7 +38,7 @@
       },
       "add_notification": {
         "title": "Add Notification Rule",
-        "description": "Choose a plain-language activation behavior. Automatic rules can follow a state for as long as it is true, or start a timed notification when that state is entered.",
+        "description": "Choose a plain-language activation behavior. Automatic rules can follow a state for as long as it is true, or start a timed notification when that state is entered. Color, brightness, and effect are set afterward on the rule's own light.",
         "data": {
           "name": "Notification name",
           "description": "What this notification means",
@@ -53,7 +53,7 @@
       },
       "modify_notification_form": {
         "title": "Edit Notification Rule",
-        "description": "Renaming changes the display name only; the entity ID remains stable.",
+        "description": "Renaming changes the display name only; the entity ID remains stable. Color, brightness, and effect live on the rule's own light, not here.",
         "data": {
           "name": "Notification name",
           "description": "What this notification means",
@@ -75,15 +75,11 @@
         }
       },
       "notification_details": {
-        "title": "Style the Notification",
-        "description": "Choose the LED appearance. Higher-priority notifications win when several are active on the same switch. Priority 30 or lower always has a one-pixel footprint in the stack, regardless of the selected coverage.",
+        "title": "Priority and Coverage",
+        "description": "Higher-priority notifications win when several are active on the same switch. Priority also orders these rules in the device's configuration section. Priority 30 or lower always has a one-pixel footprint in the stack, regardless of the selected coverage. Color, brightness, and effect are set on the rule's light once it exists.",
         "data": {
           "active_state": "Source state",
           "duration": "Show for (seconds)",
-          "color": "Color",
-          "effect": "Effect",
-          "effect_speed": "Speed",
-          "brightness": "Brightness",
           "priority": "Priority",
           "display_mode": "Light-bar coverage"
         }
