@@ -54,11 +54,22 @@ Z2M_EFFECT_MAP: dict[tuple[Effect, Speed], str] = {
     (Effect.AURORA, Speed.SLOW): "aurora",
     (Effect.AURORA, Speed.MEDIUM): "aurora",
     (Effect.AURORA, Speed.FAST): "aurora",
+    (Effect.OPEN_CLOSE, Speed.SLOW): "open_close",
+    (Effect.OPEN_CLOSE, Speed.MEDIUM): "open_close",
+    (Effect.OPEN_CLOSE, Speed.FAST): "open_close",
+    (Effect.SMALL_TO_BIG, Speed.SLOW): "small_to_big",
+    (Effect.SMALL_TO_BIG, Speed.MEDIUM): "small_to_big",
+    (Effect.SMALL_TO_BIG, Speed.FAST): "small_to_big",
+    (Effect.SIREN, Speed.SLOW): "slow_siren",
+    (Effect.SIREN, Speed.MEDIUM): "fast_siren",
+    (Effect.SIREN, Speed.FAST): "fast_siren",
 }
 
-# Zigbee2MQTT exposes a smaller effect set for an individual pixel than for
-# the full bar. In particular, individual effects do not have speed variants
-# for chase/falling/rising and do not expose a medium blink.
+# Zigbee2MQTT exposes a much smaller effect set for an individual pixel than
+# for the full bar: no speed variants for chase/falling/rising, no medium
+# blink, and no open_close, small_to_big or siren at all. Those three fall
+# back to the nearest pixel-sized thing -- a swelling pulse, and a blink at
+# the siren's own speed.
 Z2M_INDIVIDUAL_EFFECT_MAP: dict[tuple[Effect, Speed], str] = {
     (Effect.SOLID, Speed.SLOW): "solid",
     (Effect.SOLID, Speed.MEDIUM): "solid",
@@ -81,6 +92,15 @@ Z2M_INDIVIDUAL_EFFECT_MAP: dict[tuple[Effect, Speed], str] = {
     (Effect.AURORA, Speed.SLOW): "aurora",
     (Effect.AURORA, Speed.MEDIUM): "aurora",
     (Effect.AURORA, Speed.FAST): "aurora",
+    (Effect.OPEN_CLOSE, Speed.SLOW): "pulse",
+    (Effect.OPEN_CLOSE, Speed.MEDIUM): "pulse",
+    (Effect.OPEN_CLOSE, Speed.FAST): "pulse",
+    (Effect.SMALL_TO_BIG, Speed.SLOW): "pulse",
+    (Effect.SMALL_TO_BIG, Speed.MEDIUM): "pulse",
+    (Effect.SMALL_TO_BIG, Speed.FAST): "pulse",
+    (Effect.SIREN, Speed.SLOW): "slow_blink",
+    (Effect.SIREN, Speed.MEDIUM): "fast_blink",
+    (Effect.SIREN, Speed.FAST): "fast_blink",
 }
 
 # MQTT publication only confirms that Home Assistant handed the payload to the

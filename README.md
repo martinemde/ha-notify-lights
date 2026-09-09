@@ -77,7 +77,8 @@ without reloading it.
 - A timed rule turns itself off when its duration runs out.
 - Effect and speed are one Home Assistant effect name: `blink fast`,
   `chase slow`. Effects with nothing to vary are bare — `solid`, `pulse`,
-  `aurora`, each a single value in the Zigbee2MQTT enum.
+  `aurora`, `open_close`, `small_to_big`, each a single value in the
+  Zigbee2MQTT enum.
 - Dragging saturation to zero asks for white, which is off the hue wheel.
 
 Each light is named with its priority first — `085 Fridge ajar` — so the
@@ -173,9 +174,16 @@ cannot leak through.
 
 Zigbee2MQTT has separate `clear_effect` commands for the full bar and for each
 of LEDs 1–7; it does not expose a writable clear-all command. The adapter uses
-the smallest applicable clear once state is known. Individual blink falls back
-to slow or fast (medium uses fast), and chase/falling/rising use the one speed
-exposed by Zigbee2MQTT. The bottom priority indicator is always solid.
+the smallest applicable clear once state is known. The bottom priority
+indicator is always solid.
+
+The full bar can run every animation the switch has: solid, blink, pulse,
+chase, falling, rising, aurora, open/close, small-to-big, and siren.
+Zigbee2MQTT's single-pixel enum is much shorter, so a rule shown on one LED
+degrades: blink falls back to slow or fast (medium uses fast);
+chase/falling/rising use the one speed available; open/close and small-to-big
+become a pulse; and a siren becomes a slow or fast blink. Siren has no medium
+on either transport — medium renders as fast.
 
 Priority 30 and below is reserved for minor notifications. These rules always
 have a one-pixel footprint in the normal stack, even when their configured

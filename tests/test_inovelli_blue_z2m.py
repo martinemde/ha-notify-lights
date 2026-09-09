@@ -49,12 +49,84 @@ def test_effect_to_z2m_string():
     assert effect_to_z2m_string(Effect.AURORA, Speed.FAST) == "aurora"
 
 
+def test_effect_to_z2m_string_covers_the_bar_only_animations():
+    assert effect_to_z2m_string(Effect.OPEN_CLOSE, Speed.MEDIUM) == "open_close"
+    assert effect_to_z2m_string(Effect.SMALL_TO_BIG, Speed.FAST) == "small_to_big"
+    assert effect_to_z2m_string(Effect.SIREN, Speed.SLOW) == "slow_siren"
+    assert effect_to_z2m_string(Effect.SIREN, Speed.FAST) == "fast_siren"
+    # No medium_siren exists, so medium renders as fast.
+    assert effect_to_z2m_string(Effect.SIREN, Speed.MEDIUM) == "fast_siren"
+
+
 def test_individual_effect_to_z2m_string_uses_supported_effects():
     assert individual_effect_to_z2m_string(Effect.BLINK, Speed.SLOW) == "slow_blink"
     assert individual_effect_to_z2m_string(Effect.BLINK, Speed.MEDIUM) == "fast_blink"
     assert individual_effect_to_z2m_string(Effect.FALLING, Speed.FAST) == "falling"
     assert individual_effect_to_z2m_string(Effect.RISING, Speed.SLOW) == "rising"
     assert individual_effect_to_z2m_string(Effect.CHASE, Speed.FAST) == "chase"
+
+
+def test_bar_only_animations_fall_back_on_a_single_pixel():
+    """One pixel has no open_close, small_to_big or siren to send."""
+    assert individual_effect_to_z2m_string(Effect.OPEN_CLOSE, Speed.MEDIUM) == "pulse"
+    assert individual_effect_to_z2m_string(Effect.SMALL_TO_BIG, Speed.FAST) == "pulse"
+    assert individual_effect_to_z2m_string(Effect.SIREN, Speed.SLOW) == "slow_blink"
+    assert individual_effect_to_z2m_string(Effect.SIREN, Speed.FAST) == "fast_blink"
+
+
+# The enums Zigbee2MQTT publishes for the VZM31-SN. Anything outside these is
+# rejected by the coordinator, silently leaving the LED as it was.
+# https://www.zigbee2mqtt.io/devices/VZM31-SN.html
+Z2M_BAR_EFFECTS = {
+    "off",
+    "solid",
+    "fast_blink",
+    "slow_blink",
+    "pulse",
+    "chase",
+    "open_close",
+    "small_to_big",
+    "aurora",
+    "slow_falling",
+    "medium_falling",
+    "fast_falling",
+    "slow_rising",
+    "medium_rising",
+    "fast_rising",
+    "medium_blink",
+    "slow_chase",
+    "fast_chase",
+    "fast_siren",
+    "slow_siren",
+    "clear_effect",
+}
+Z2M_PIXEL_EFFECTS = {
+    "off",
+    "solid",
+    "fast_blink",
+    "slow_blink",
+    "pulse",
+    "chase",
+    "falling",
+    "rising",
+    "aurora",
+    "clear_effect",
+}
+
+
+@pytest.mark.parametrize("effect", list(Effect))
+@pytest.mark.parametrize("speed", list(Speed))
+def test_every_effect_and_speed_reaches_both_transports(effect, speed):
+    assert effect_to_z2m_string(effect, speed) in Z2M_BAR_EFFECTS
+    assert individual_effect_to_z2m_string(effect, speed) in Z2M_PIXEL_EFFECTS
+
+
+def test_no_bar_animation_is_unreachable():
+    """Every animation the switch can run must be authorable."""
+    reachable = {
+        effect_to_z2m_string(effect, speed) for effect in Effect for speed in Speed
+    }
+    assert Z2M_BAR_EFFECTS - reachable == {"off", "clear_effect"}
 
 
 # --- Adapter render/clear tests ---

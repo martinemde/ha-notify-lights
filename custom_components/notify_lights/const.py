@@ -11,6 +11,11 @@ class Effect(StrEnum):
     FALLING = "falling"
     RISING = "rising"
     AURORA = "aurora"
+    OPEN_CLOSE = "open_close"
+    SMALL_TO_BIG = "small_to_big"
+    # slow_siren and fast_siren in Zigbee2MQTT: one effect with a speed, the
+    # way blink is. There is no medium_siren; medium renders as fast.
+    SIREN = "siren"
 
 
 class Speed(StrEnum):
@@ -24,7 +29,15 @@ class Speed(StrEnum):
 # picking a speed for them would change nothing on the only hardware there
 # is an adapter for. Their light-entity effect name is bare. Move one out of
 # here if an adapter ever renders its speeds differently.
-SPEEDLESS_EFFECTS = frozenset({Effect.SOLID, Effect.PULSE, Effect.AURORA})
+SPEEDLESS_EFFECTS = frozenset(
+    {
+        Effect.SOLID,
+        Effect.PULSE,
+        Effect.AURORA,
+        Effect.OPEN_CLOSE,
+        Effect.SMALL_TO_BIG,
+    }
+)
 
 
 class Activation(StrEnum):
